@@ -22,3 +22,7 @@ Thumbs.db
 .idea/
 # App data
 *.tmp
+
+Gemini_Generated_Image*.jpg
+LASK*.png
+
