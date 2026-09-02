@@ -1,0 +1,24 @@
+# Rust
+target/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+# Node
+node_modules/
+tauri-app/node_modules/
+tauri-app/dist/
+# Build
+build/
+dist/
+*.log
+# OS
+.DS_Store
+Thumbs.db
+# IDE
+.vscode/
+.idea/
+# App data
+*.tmp
