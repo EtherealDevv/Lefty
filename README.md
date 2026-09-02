@@ -1,3 +1,5 @@
+![Banner](assets/banner.jpg)
+
 # Lefty
 
 Remap any key for left-handed gaming. Low latency, native Rust engine.
