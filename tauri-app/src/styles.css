@@ -1,9 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* { font-family: Inter, 'Segoe UI', system-ui, sans-serif; }
+/* M3 Expressive 2025 — Shape / Motion / Typography (monochrome #121212) */
+:root {
+  color-scheme: dark;
+
+  /* Shape — Expressive */
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 999px;
+
+  /* Motion — Expressive (spring + emphasized) */
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --md-sys-motion-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --md-sys-motion-duration-short1: 50ms;
+  --md-sys-motion-duration-short2: 100ms;
+  --md-sys-motion-duration-short3: 150ms;
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-duration-long1: 450ms;
+  --md-sys-motion-duration-long2: 500ms;
+
+  /* Typography — Expressive */
+  --md-sys-typescale-display-large-font: "Outfit", Inter, system-ui, sans-serif;
+  --md-sys-typescale-title-large-font: "Outfit", Inter, system-ui, sans-serif;
+  --md-sys-typescale-body-large-font: "Inter", system-ui, sans-serif;
+  --md-sys-typescale-label-large-font: "Inter", system-ui, sans-serif;
+  --md-sys-typescale-code-font: "JetBrains Mono", monospace;
+}
+
+/* Base — use M3 surface tokens injected by materialYouExpressive.ts */
+html, body {
+  background: var(--md-sys-color-surface-dim, #121212);
+  color: var(--md-sys-color-on-surface, #E6E1EC);
+  font-family: var(--md-sys-typescale-body-large-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* { font-family: inherit; }
+h1, h2, h3, .font-display { font-family: var(--md-sys-typescale-display-large-font); letter-spacing: -0.02em; }
+code, pre, .font-mono { font-family: var(--md-sys-typescale-code-font); }
+
+/* Scrollbar — M3 outline variant */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #46464F; border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: #77767E; }
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant, #46464F);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-outline, #77767E); }
+
+/* M3 Expressive utilities */
+@layer utilities {
+  .m3-surface { background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+  .m3-surface-container { background: var(--md-sys-color-surface-container); }
+  .m3-surface-container-high { background: var(--md-sys-color-surface-container-high); }
+  .m3-surface-container-highest { background: var(--md-sys-color-surface-container-highest); }
+  .m3-primary { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+  .m3-primary-container { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .m3-secondary-container { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+  .m3-tertiary-container { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
+  .m3-error-container { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+  .m3-outline { border-color: var(--md-sys-color-outline); }
+  .m3-outline-variant { border-color: var(--md-sys-color-outline-variant); }
+  .m3-elev-1 { box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.2); }
+  .m3-elev-2 { box-shadow: 0 2px 6px rgba(0,0,0,0.35), 0 8px 16px rgba(0,0,0,0.25); }
+  .m3-elev-3 { box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 16px 32px rgba(0,0,0,0.3); }
+  .m3-motion-emphasized { transition-timing-function: var(--md-sys-motion-easing-emphasized); }
+  .m3-motion-spring { transition-timing-function: var(--md-sys-motion-spring); }
+  .m3-shape-xl { border-radius: var(--md-sys-shape-corner-extra-large); }
+  .m3-shape-lg { border-radius: var(--md-sys-shape-corner-large); }
+  .m3-shape-md { border-radius: var(--md-sys-shape-corner-medium); }
+  .m3-shape-full { border-radius: var(--md-sys-shape-corner-full); }
+}

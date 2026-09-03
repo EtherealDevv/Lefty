@@ -38,7 +38,6 @@ import {
   SchemeTonalSpot,
   SchemeVibrant,
   DynamicColor,
-  Platform,
 } from "@material/material-color-utilities";
 
 // Keep the exact list that material-you-utilities uses (src/models/constants/colors.ts)
@@ -104,8 +103,8 @@ interface GenerateOptions {
   baseHex?: string;          // e.g. "#121212"
   scheme?: SchemeChoice;     // monochrome keeps it greyscale (user request)
   contrast?: number;         // -1 .. 1
-  spec?: SpecVersion;        // 2025 = Expressive spec
-  platform?: Platform;       // phone | watch
+  spec?: SpecVersion;        // 2025 = Expressive spec (kept for compat, not used in 0.3.0)
+  platform?: string;       // phone | watch (kept for compat)
 }
 
 const token = (name: string) =>
@@ -131,8 +130,8 @@ export function generateExpressiveTokens(opts: GenerateOptions = {}) {
 
   for (const isDark of [false, true]) {
     const mode = isDark ? "dark" : "light";
-    // @ts-ignore — constructor sig is (Hct, isDark, contrast, spec, platform)
-    const sch = new (SchemeClass as any)(hct, isDark, contrast, spec, platform);
+    // material-color-utilities 0.3.0 sig is (Hct, isDark, contrastLevel) — spec/platform ignored (kept for compat)
+    const sch = new (SchemeClass as any)(hct, isDark, contrast);
     for (const name of expressiveDynamicColors) {
       const dc = MaterialDynamicColors[name as keyof typeof MaterialDynamicColors] as DynamicColor;
       if (!dc) continue;

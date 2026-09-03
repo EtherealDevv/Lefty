@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
-import { Gamepad2, Keyboard, Mouse, Plus, Trash2, ArrowLeftRight, Settings2, Shield, Zap, Activity } from "lucide-react";
+import { Gamepad2, Keyboard, Mouse, Plus, Trash2, ArrowLeftRight, Shield, Zap, Activity, Sparkles } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import laskIcon from "./LASK.png";
 
 type Mapping = [string, string];
@@ -47,11 +46,9 @@ export default function App() {
 
   useEffect(() => {
     invoke<boolean>("is_admin").then(setIsAdmin).catch(()=>{});
-    // native low-level: fetch GetKeyNameList from Rust (dynamic layout, not static)
     invoke<[number, string][]>("get_key_name_list").then(list => {
       if (Array.isArray(list) && list.length > 10) {
         const names = list.map(([, name]) => name).filter(n => n && n !== "Undefined");
-        // Ensure distinct LATAM OEMs are present even if layout is US (fallback)
         if (!names.includes("Ñ") && FALLBACK_ALL_KEYS.includes("Ñ")) names.push("Ñ");
         if (!names.includes("'") && FALLBACK_ALL_KEYS.includes("'")) names.push("'");
         if (!names.includes("´") && FALLBACK_ALL_KEYS.includes("´")) names.push("´");
@@ -91,7 +88,6 @@ export default function App() {
     let cancelled = false;
     invoke<string>("capture_key").then(key => {
       if (cancelled) return;
-      // Capture: key name is already via GetKeyName — accept any from allKeys
       if (allKeys.includes(key)) {
         if (capturing === "src") setSrcKey(key);
         else setDstKey(key);
@@ -101,12 +97,10 @@ export default function App() {
           if (capturing === "src") setSrcKey(up);
           else setDstKey(up);
         } else if (key.startsWith("VK_")) {
-          // Fallback for unknown VKs
           if (capturing === "src") setSrcKey(key);
           else setDstKey(key);
         }
       } else if (key.includes("(") || key.includes("VK")) {
-        // Special names like "Shift (Left)" — accept
         if (capturing === "src") setSrcKey(key);
         else setDstKey(key);
       }
@@ -141,9 +135,7 @@ export default function App() {
     syncEngine(profiles[active].mappings);
   }, [active]);
 
-  // Auto-start: load profiles and activate engine
   useEffect(() => {
-    // Esperar a que localStorage haya cargado perfiles (si hay)
     const t = setTimeout(() => {
       invoke("set_engine_enabled", {enabled: true}).catch(()=>{});
       invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
@@ -200,206 +192,224 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-[#0A0A0F] text-zinc-100 flex flex-col overflow-hidden selection:bg-white/20 relative">
-      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-white/[0.02] pointer-events-none" />
-      {/* Header - Glassify Material Monochrome */}
-      <header className="h-[68px] bg-zinc-900/60 backdrop-blur-2xl border-b border-white/[0.06] flex items-center justify-between px-7 sticky top-0 z-10">
+    <div className="h-screen bg-surface-dim text-on-surface flex flex-col overflow-hidden selection:bg-primary/20 relative font-sans antialiased">
+      {/* M3 Expressive background — surface dim with tonal overlay */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-tertiary/5 pointer-events-none" />
+      <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `radial-gradient(circle at 1px 1px, var(--md-sys-color-on-surface) 1px, transparent 0)`, backgroundSize: `24px 24px` }} />
+
+      {/* Header — M3 Expressive Top App Bar */}
+      <header className="h-[72px] bg-surface-container border-b border-outline-variant flex items-center justify-between px-6 sticky top-0 z-10 shadow-m3-1 backdrop-blur-xl">
         <div className="flex items-center gap-4">
-          <div className="w-9 h-9 rounded-xl overflow-hidden ring-1 ring-zinc-700 shadow-sm">
+          <div className="w-11 h-11 rounded-xl bg-primary-container grid place-items-center shadow-m3-1 overflow-hidden border border-outline-variant">
             <img src={laskIcon} alt="Lefty" className="w-full h-full object-cover" />
           </div>
           <div className="leading-none">
-            <div className="flex items-baseline gap-2">
-              <h1 className="text-[17px] font-semibold tracking-tight text-white">Lefty</h1>
-              <span className="text-[10px] font-medium tracking-widest text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded">v2</span>
+            <div className="flex items-baseline gap-2.5">
+              <h1 className="text-[22px] font-display font-medium tracking-tight text-on-surface">Lefty</h1>
+              <span className="text-[11px] font-medium tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant px-2 py-0.5 rounded-full">v2 • Expressive</span>
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-tertiary bg-tertiary-container border border-outline-variant px-2 py-0.5 rounded-full"><Sparkles size={11}/>M3 2025</span>
             </div>
-            <p className="text-[11px] font-medium tracking-wide text-zinc-400 mt-[2px]">By Sycho <span className="text-zinc-600">·</span> Left-handed</p>
+            <p className="text-[12px] font-sans tracking-wide text-on-surface-variant mt-1">By Sycho <span className="text-outline">·</span> Left-handed • Monochrome #121212</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2.5 pl-3 pr-1 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50">
-            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-zinc-600"}`} />
-            <span className="text-[11px] font-medium tracking-wide text-zinc-300 pr-2">{enabled ? "ACTIVE" : "INACTIVE"}</span>
-            <button onClick={toggle} className={`h-7 px-4 rounded-full text-[12px] font-medium transition-all ${enabled ? "bg-zinc-700 hover:bg-zinc-600 text-white" : "bg-white hover:bg-zinc-100 text-zinc-900"}`}>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3 pl-4 pr-1.5 py-1.5 rounded-full bg-surface-container-high border border-outline-variant shadow-m3-1">
+            <div className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${enabled ? "bg-tertiary shadow-[0_0_10px_var(--md-sys-color-tertiary)]" : "bg-outline"}`} />
+            <span className="text-[12px] font-medium tracking-wide text-on-surface pr-1">{enabled ? "ACTIVE" : "INACTIVE"}</span>
+            <button onClick={toggle} className={`h-9 px-5 rounded-full text-[13px] font-medium transition-all duration-[300ms] ease-m3-emphasized shadow-m3-1 active:scale-[0.98] ${enabled ? "bg-surface-container-highest border border-outline text-on-surface hover:bg-surface-container-high" : "bg-primary text-on-primary hover:shadow-m3-2"}`}>
               {enabled ? "Pause" : "Activate"}
             </button>
           </div>
           <div className="sm:hidden flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-emerald-500" : "bg-zinc-600"}`} />
-            <button onClick={toggle} className={`h-8 px-4 rounded-full text-[12px] font-medium ${enabled ? "bg-zinc-800 text-white border border-zinc-700" : "bg-white text-zinc-900"}`}>{enabled ? "Pause" : "Activate"}</button>
+            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-tertiary" : "bg-outline"}`} />
+            <button onClick={toggle} className={`h-9 px-5 rounded-full text-[13px] font-medium shadow-m3-1 ${enabled ? "bg-surface-container-high border border-outline text-on-surface" : "bg-primary text-on-primary"}`}>{enabled ? "Pause" : "Activate"}</button>
           </div>
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 grid grid-cols-12 gap-5 p-5 max-w-[1440px] w-full mx-auto overflow-hidden">
-        {/* Left - Profiles - Glassify Monochrome */}
-        <aside className="col-span-12 lg:col-span-3 bg-zinc-900/40 backdrop-blur-xl rounded-2xl border border-white/[0.06] flex flex-col overflow-hidden min-h-0 shadow-lg">
-          <div className="px-4 pt-4 pb-3 border-b border-white/[0.04]">
-            <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400">PROFILES</h2>
-            <p className="text-[11px] text-zinc-500 mt-1">Choose your left-handed layout</p>
+      <div className="flex-1 min-h-0 grid grid-cols-12 gap-4 p-4 max-w-[1440px] w-full mx-auto overflow-hidden">
+        {/* Left — Profiles — M3 Navigation Drawer expressive */}
+        <aside className="col-span-12 lg:col-span-3 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
+          <div className="px-5 pt-5 pb-4">
+            <h2 className="text-[13px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-primary"/>PROFILES</h2>
+            <p className="text-[12px] font-sans leading-relaxed text-on-surface-variant mt-1.5">Choose your left-handed layout — expressive M3</p>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto p-2.5 pb-3 space-y-1.5">
+          <div className="flex-1 min-h-0 overflow-auto px-3 pb-3 space-y-2">
             {Object.entries(profiles).map(([key, p]) => (
-              <button key={key} onClick={() => setActive(key)} className={`w-full text-left p-3 rounded-xl border transition-all flex items-center gap-3 backdrop-blur-sm ${active===key ? "bg-white border-white text-zinc-900 shadow-md" : "bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.06] hover:border-white/10 text-zinc-100"}`}>
-                <span className={`w-8 h-8 grid place-items-center rounded-lg text-[13px] font-medium flex-shrink-0 ${active===key ? "bg-zinc-900 text-white" : "bg-zinc-900 border border-zinc-800 text-zinc-400"}`}>{p.icon}</span>
+              <button key={key} onClick={() => setActive(key)} className={`w-full text-left p-3.5 rounded-[16px] border transition-all duration-[300ms] ease-m3-spring flex items-center gap-3 group ${active===key ? "bg-primary text-on-primary border-primary shadow-m3-2 scale-[1.01]" : "bg-surface-container-high border-outline-variant hover:bg-surface-container-highest hover:border-outline hover:shadow-m3-1 hover:scale-[1.005] text-on-surface"}`}>
+                <span className={`w-10 h-10 grid place-items-center rounded-[12px] text-[15px] font-medium flex-shrink-0 transition-colors ${active===key ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container group-hover:bg-primary-container group-hover:text-on-primary-container"}`}>{p.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <div className={`text-[13px] font-medium leading-none truncate ${active===key ? "text-zinc-900" : "text-white"}`}>{p.display_name}</div>
-                  <div className={`text-[11px] mt-1 truncate ${active===key ? "text-zinc-500" : "text-zinc-400"}`}>{p.mappings.length} mappings · {p.description.split("·")[0]?.trim() || p.description.slice(0,22)}</div>
+                  <div className={`text-[14px] font-medium leading-none truncate ${active===key ? "text-on-primary" : "text-on-surface"}`}>{p.display_name}</div>
+                  <div className={`text-[11px] mt-1 truncate ${active===key ? "text-on-primary/80" : "text-on-surface-variant"}`}>{p.mappings.length} mappings · {p.description.split("·")[0]?.trim() || p.description.slice(0,22)}</div>
                 </div>
-                {active===key && <div className="w-1.5 h-1.5 rounded-full bg-zinc-900 flex-shrink-0" />}
+                {active===key && <div className="w-2 h-2 rounded-full bg-on-primary flex-shrink-0 animate-pulse" />}
               </button>
             ))}
           </div>
-          <div className="p-3 border-t border-zinc-800 bg-zinc-900/50">
-            <div className="rounded-xl bg-zinc-800 border border-zinc-700/50 p-3 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white text-zinc-900 grid place-items-center"><Zap size={14} /></div>
+          <div className="p-3 border-t border-outline-variant bg-surface-container-high/50">
+            <div className="rounded-[16px] bg-surface-container-high border border-outline-variant p-3.5 flex items-center gap-3 shadow-m3-1">
+              <div className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center shadow-m3-1"><Zap size={16} /></div>
               <div>
-                <div className="text-[11px] font-medium text-white leading-none">Native Engine</div>
-                <div className="text-[11px] text-zinc-400 mt-1">Rust • 0.02ms • WH_KEYBOARD_LL</div>
+                <div className="text-[12px] font-medium text-on-surface leading-none font-display">Native Engine</div>
+                <div className="text-[11px] font-mono text-on-surface-variant mt-1">Rust • 0.02ms • WH_KEYBOARD_LL</div>
               </div>
+              <span className="ml-auto w-2 h-2 rounded-full bg-tertiary animate-pulse" />
             </div>
           </div>
         </aside>
 
-        {/* Center - Mappings */}
-        <main className="col-span-12 lg:col-span-6 bg-zinc-900 rounded-2xl border border-zinc-800 flex flex-col overflow-hidden min-h-0 shadow-sm">
-          <div className="px-5 py-4 border-b border-zinc-800">
+        {/* Center — Mappings — M3 Card expressive */}
+        <main className="col-span-12 lg:col-span-6 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
+          <div className="px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-[15px] font-semibold tracking-tight text-white flex items-center gap-2"><Keyboard size={14} className="text-zinc-500"/> {prof.display_name}</h2>
-                <p className="text-[12px] text-zinc-400 mt-1.5 leading-relaxed max-w-[520px]">{prof.description}</p>
+                <h2 className="text-[20px] font-display font-medium tracking-tight text-on-surface flex items-center gap-2.5"><span className="w-8 h-8 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center"><Keyboard size={16}/></span> {prof.display_name}</h2>
+                <p className="text-[13px] font-sans text-on-surface-variant mt-2 leading-relaxed max-w-[520px]">{prof.description}</p>
               </div>
-              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-8 px-3.5 rounded-full bg-white text-zinc-900 text-[12px] font-medium items-center gap-1.5 hover:bg-zinc-100 transition shadow-sm"><Plus size={14} className="text-zinc-700"/> Add</button>
+              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-2 hover:shadow-m3-2 transition-all duration-300 ease-m3-emphasized active:scale-[0.98] shadow-m3-1"><Plus size={16} className="text-on-primary"/> Add</button>
             </div>
           </div>
-          <div className="px-5 py-2.5 flex items-center justify-between text-[10px] font-medium tracking-widest text-zinc-500 border-b border-zinc-800/80 bg-zinc-900">
-            <span>{prof.mappings.length} MAPPINGS</span><span className="font-normal tracking-wide text-zinc-600">SOURCE → TARGET</span>
+          <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-y border-outline-variant bg-surface-container-high">
+            <span className="flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>{prof.mappings.length} MAPPINGS</span><span className="font-mono font-normal tracking-wide text-outline text-[10px]">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-1.5 bg-zinc-900">
+          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-2 bg-surface-container">
             {prof.mappings.length===0 ? (
-              <div className="py-16 text-center">
-                <div className="w-10 h-10 mx-auto rounded-xl bg-zinc-800 border border-zinc-700 grid place-items-center text-zinc-500"><Keyboard size={18}/></div>
-                <p className="text-[13px] font-medium text-zinc-300 mt-3">No mappings</p>
-                <p className="text-[12px] text-zinc-500">Add your first remap to start</p>
-                <button onClick={()=>setShowAdd(true)} className="mt-4 h-8 px-4 rounded-full bg-white text-zinc-900 text-[12px] font-medium">Add mapping</button>
+              <div className="py-16 text-center animate-m3-fade-in">
+                <div className="w-16 h-16 mx-auto rounded-[20px] bg-surface-container-high border border-outline-variant grid place-items-center text-outline shadow-m3-1"><Keyboard size={24}/></div>
+                <p className="text-[15px] font-display font-medium text-on-surface mt-4">No mappings</p>
+                <p className="text-[13px] font-sans text-on-surface-variant">Add your first remap to start — expressive</p>
+                <button onClick={()=>setShowAdd(true)} className="mt-6 h-10 px-6 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 transition-all">Add mapping</button>
               </div>
             ) : prof.mappings.map(([s,d])=>(
-              <div key={s} className="h-[46px] bg-zinc-800/70 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 rounded-xl flex items-center px-3 gap-2.5 group transition">
-                <span className="px-3 py-1 rounded-full bg-zinc-900 border border-zinc-700 text-[11px] font-mono font-medium min-w-[64px] text-center text-zinc-200">{s}</span>
-                <span className="w-6 h-6 rounded-full bg-white text-zinc-900 grid place-items-center text-[10px] font-medium">→</span>
-                <span className="px-3 py-1 rounded-full bg-white text-zinc-900 text-[11px] font-mono font-medium min-w-[64px] text-center border border-zinc-200">{d}</span>
-                <span className="hidden sm:block text-[11px] text-zinc-500 ml-1">remap</span>
-                <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-7 h-7 grid place-items-center rounded-full bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 text-zinc-300"><ArrowLeftRight size={11}/></button>
-                  <button onClick={()=>delMap(s)} title="Delete" className="w-7 h-7 grid place-items-center rounded-full bg-zinc-900 hover:bg-red-950/50 border border-zinc-800 hover:border-red-900/50 text-zinc-400 hover:text-red-400"><Trash2 size={11}/></button>
+              <div key={s} className="h-[56px] bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest hover:border-outline hover:shadow-m3-1 rounded-[16px] flex items-center px-4 gap-3 group transition-all duration-300 ease-m3-spring">
+                <span className="px-3.5 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[12px] font-mono font-medium min-w-[72px] text-center text-on-surface shadow-sm">{s}</span>
+                <span className="w-7 h-7 rounded-full bg-primary text-on-primary grid place-items-center text-[12px] font-medium shadow-m3-1 group-hover:scale-110 transition-transform duration-300 ease-m3-spring">→</span>
+                <span className="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[12px] font-mono font-medium min-w-[72px] text-center border border-outline-variant shadow-sm">{d}</span>
+                <span className="hidden sm:block text-[11px] font-sans text-on-surface-variant ml-1">remap</span>
+                <div className="ml-auto flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-secondary-container border border-outline-variant hover:border-outline text-on-surface-variant hover:text-on-secondary-container transition-colors"><ArrowLeftRight size={13}/></button>
+                  <button onClick={()=>delMap(s)} title="Delete" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-error-container border border-outline-variant hover:border-error text-on-surface-variant hover:text-on-error-container transition-colors"><Trash2 size={13}/></button>
                 </div>
               </div>
             ))}
           </div>
+          <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-between">
+            <span className="text-[11px] font-mono text-on-surface-variant">{prof.mappings.length} active • M3 Expressive</span>
+            <button onClick={()=>setShowAdd(true)} className="sm:hidden h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 flex items-center gap-1.5"><Plus size={14}/>Add</button>
+          </div>
         </main>
 
-        {/* Right - Status */}
-        <aside className="col-span-12 lg:col-span-3 space-y-4 overflow-auto min-h-0 pr-1">
-          <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4 shadow-sm">
+        {/* Right — Status — M3 expressive panels */}
+        <aside className="col-span-12 lg:col-span-3 space-y-3 overflow-auto min-h-0 pr-1">
+          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
             <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-semibold tracking-widest text-zinc-400">STATUS</h3>
-              <span className={`px-2 py-1 rounded-full text-[10px] font-medium tracking-widest border ${enabled ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-500"}`}>{enabled ? "LIVE" : "IDLE"}</span>
+              <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>STATUS</h3>
+              <span className={`px-3 py-1 rounded-full text-[11px] font-medium tracking-widest border shadow-sm ${enabled ? "bg-tertiary-container text-on-tertiary-container border-outline-variant" : "bg-surface-container-high border-outline-variant text-on-surface-variant"}`}>{enabled ? "LIVE" : "IDLE"}</span>
             </div>
-            <div className={`mt-3 p-3.5 rounded-xl border ${enabled ? "bg-zinc-800 border-zinc-700" : "bg-zinc-800/50 border-zinc-800"}`}>
-              <div className="flex items-center gap-2">
-                <Activity size={14} className={enabled ? "text-emerald-500" : "text-zinc-600"} />
-                <div className="text-[13px] font-medium text-white">WH_KEYBOARD_LL</div>
-                {enabled && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+            <div className={`mt-4 p-4 rounded-[16px] border transition-all ${enabled ? "bg-surface-container-high border-outline shadow-m3-1" : "bg-surface-container-high/50 border-outline-variant"}`}>
+              <div className="flex items-center gap-2.5">
+                <span className={`w-8 h-8 rounded-[12px] grid place-items-center ${enabled ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-highest text-outline border border-outline-variant"}`}><Activity size={16} /></span>
+                <div>
+                  <div className="text-[13px] font-medium text-on-surface font-mono">WH_KEYBOARD_LL</div>
+                  <div className="text-[11px] font-sans text-on-surface-variant">{enabled ? "Hook active • Ready" : "Hook paused"}</div>
+                </div>
+                {enabled && <span className="ml-auto w-2 h-2 rounded-full bg-tertiary animate-pulse shadow-[0_0_8px_var(--md-sys-color-tertiary)]" />}
               </div>
-              <div className="text-[11px] text-zinc-400 mt-1">{enabled ? "Hook active • Ready" : "Hook paused"}</div>
             </div>
             {!isAdmin ? (
-              <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex gap-2.5">
-                <Shield size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="mt-3 p-3.5 rounded-[16px] bg-error-container/30 border border-outline-variant flex gap-3">
+                <span className="w-8 h-8 rounded-[12px] bg-error-container text-on-error-container grid place-items-center flex-shrink-0"><Shield size={14}/></span>
                 <div>
-                  <div className="text-[11px] font-medium text-amber-200">Admin required</div>
-                  <div className="text-[11px] leading-relaxed text-amber-200/70 mt-1">Some games need elevation. Run as admin for full coverage.</div>
+                  <div className="text-[12px] font-medium text-on-surface">Admin required</div>
+                  <div className="text-[11px] leading-relaxed font-sans text-on-surface-variant mt-1">Some games need elevation. Run as admin for full coverage.</div>
                 </div>
               </div>
             ) : (
-              <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex gap-2.5">
-                <Shield size={14} className="text-emerald-500 mt-0.5" />
-                <div className="text-[11px] font-medium text-emerald-200">Admin active</div>
+              <div className="mt-3 p-3.5 rounded-[16px] bg-tertiary-container border border-outline-variant flex gap-3">
+                <span className="w-8 h-8 rounded-[12px] bg-tertiary text-on-tertiary grid place-items-center"><Shield size={14} /></span>
+                <div className="text-[12px] font-medium text-on-tertiary-container">Admin active</div>
+                <div className="text-[11px] font-sans text-on-tertiary-container/80">Elevation OK</div>
               </div>
             )}
           </div>
 
-          <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4 shadow-sm">
-            <h3 className="text-[11px] font-semibold tracking-widest text-zinc-400">LEFT-HANDED MOUSE</h3>
-            <label className="mt-3 flex items-center justify-between cursor-pointer group">
-              <span className="text-[12px] font-medium text-zinc-200 group-hover:text-white transition">Invert clicks</span>
-              <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; setInvertMouse(v); invoke("set_invert_clicks", {enabled: v}).catch(()=>{}); }} className="w-9 h-5 rounded-full appearance-none bg-zinc-800 border border-zinc-700 checked:bg-white checked:border-white relative before:absolute before:w-3.5 before:h-3.5 before:rounded-full before:bg-zinc-400 before:top-[2px] before:left-[2px] checked:before:bg-zinc-900 checked:before:translate-x-4 before:transition-all" />
+          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
+            <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>LEFT-HANDED MOUSE</h3>
+            <label className="mt-4 flex items-center justify-between cursor-pointer group p-2 rounded-[16px] hover:bg-surface-container-high transition-colors">
+              <span className="text-[13px] font-medium text-on-surface group-hover:text-on-surface transition-colors">Invert clicks</span>
+              <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; setInvertMouse(v); invoke("set_invert_clicks", {enabled: v}).catch(()=>{}); }} className="w-11 h-[28px] rounded-full appearance-none bg-surface-container-highest border-2 border-outline checked:bg-primary checked:border-primary relative before:absolute before:w-5 before:h-5 before:rounded-full before:bg-outline before:top-[3px] before:left-[3px] checked:before:bg-on-primary checked:before:translate-x-[18px] before:transition-all before:ease-m3-spring before:duration-300 transition-colors duration-300" />
             </label>
-            <p className="text-[11px] text-zinc-500 mt-2">Windows native • 0ms</p>
+            <p className="text-[11px] font-mono text-on-surface-variant mt-2 px-2">Windows native • 0ms • M3 tonal</p>
           </div>
 
-          <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4 shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-white text-zinc-900 grid place-items-center"><Gamepad2 size={13} /></div>
+          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-[12px] bg-primary text-on-primary grid place-items-center shadow-m3-1"><Gamepad2 size={16} /></div>
               <div>
-                <h3 className="text-[11px] font-semibold tracking-widest text-zinc-400 leading-none">GAMING</h3>
-                <p className="text-[11px] font-medium text-white leading-none mt-1">Always optimized</p>
+                <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface leading-none">GAMING</h3>
+                <p className="text-[12px] font-medium text-on-surface leading-none mt-1">Always optimized</p>
               </div>
+              <span className="ml-auto text-[10px] font-mono bg-tertiary-container text-on-tertiary-container px-2 py-1 rounded-full border border-outline-variant">0.02ms</span>
             </div>
-            <p className="text-[11px] leading-relaxed text-zinc-400 mt-3">Native Rust engine, 0.02ms. No gaming mode needed.</p>
+            <p className="text-[12px] leading-relaxed font-sans text-on-surface-variant mt-3">Native Rust engine • M3 Expressive • No gaming mode needed.</p>
           </div>
 
-          <div className="bg-zinc-800/50 rounded-xl border border-zinc-800 p-3 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-800 grid place-items-center text-zinc-500"><Mouse size={13}/></div>
+          <div className="bg-surface-container-high rounded-[16px] border border-outline-variant p-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-[12px] bg-surface-container-highest border border-outline-variant grid place-items-center text-on-surface-variant"><Mouse size={16}/></div>
             <div>
-              <div className="text-[11px] font-medium text-zinc-200">How it works</div>
-              <div className="text-[11px] text-zinc-500">Hook • SendInput • return 1</div>
+              <div className="text-[12px] font-medium text-on-surface font-display">How it works</div>
+              <div className="text-[11px] font-mono text-on-surface-variant">Hook • SendInput • return 1</div>
             </div>
           </div>
 
-          <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-3">
-            <h3 className="text-[11px] font-semibold tracking-widest text-zinc-400">DEBUG</h3>
-            <button onClick={async()=>{ try{ const info=await invoke<string>("get_debug_info"); setDebugInfo(info);}catch(e){setDebugInfo(String(e))} }} className="mt-2.5 w-full h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[11px] font-medium text-zinc-300 transition">Check mappings file</button>
-            <pre className="text-[9px] leading-relaxed text-zinc-500 mt-2.5 whitespace-pre-wrap break-all max-h-28 overflow-auto bg-zinc-950 rounded-lg p-2.5 border border-zinc-800">{debugInfo || "No data"}</pre>
+          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-3 shadow-m3-1">
+            <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface">DEBUG</h3>
+            <button onClick={async()=>{ try{ const info=await invoke<string>("get_debug_info"); setDebugInfo(info);}catch(e){setDebugInfo(String(e))} }} className="mt-3 w-full h-10 rounded-full bg-secondary-container text-on-secondary-container hover:bg-secondary-container/80 border border-outline-variant text-[12px] font-medium transition-all duration-300 ease-m3-emphasized shadow-sm hover:shadow-m3-1">Check mappings file</button>
+            <pre className="text-[10px] leading-relaxed font-mono text-on-surface-variant mt-3 whitespace-pre-wrap break-all max-h-28 overflow-auto bg-surface-container-high rounded-[12px] p-3 border border-outline-variant">{debugInfo || "No data"}</pre>
           </div>
 
           <div className="flex gap-2">
-            <button className="flex-1 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[11px] font-medium transition">Export</button>
-            <button className="flex-1 h-8 rounded-full bg-white hover:bg-zinc-100 text-zinc-900 text-[11px] font-medium transition">Import</button>
+            <button className="flex-1 h-10 rounded-full bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium transition-all shadow-sm">Export</button>
+            <button className="flex-1 h-10 rounded-full bg-primary text-on-primary text-[12px] font-medium transition-all shadow-m3-1 hover:shadow-m3-2 hover:scale-[1.01] active:scale-[0.99]">Import</button>
           </div>
-          <p className="text-[10px] text-center tracking-wide text-zinc-600">Lefty v2 • By Sycho • Rust</p>
+          <p className="text-[10px] text-center tracking-wide font-mono text-on-surface-variant">Lefty v2 • Expressive • By Sycho • Rust</p>
         </aside>
       </div>
       {showAdd && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm grid place-items-center z-50 p-4" onClick={()=>setShowAdd(false)}>
-          <div className="w-full max-w-[440px] bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-2xl" onClick={e=>e.stopPropagation()}>
-            <h3 className="text-[14px] font-semibold text-white">Add mapping</h3>
-            <p className="text-[11px] text-zinc-400 mt-1">Choose source and target — Type supported</p>
-            {capturing && <p className="mt-3 text-[11px] font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-full px-3 py-1.5 text-center">Capturing… press a key ({capturing})</p>}
-            <div className="grid grid-cols-2 gap-3 mt-4">
+        <div className="fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 animate-m3-fade-in" onClick={()=>setShowAdd(false)}>
+          <div className="w-full max-w-[460px] bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 animate-m3-fade-in" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-start justify-between">
               <div>
-                <label className="text-[10px] font-medium tracking-widest text-zinc-400">SOURCE</label>
-                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] font-mono px-3 text-white focus:outline-none focus:border-zinc-600">
+                <h3 className="text-[20px] font-display font-medium text-on-surface">Add mapping</h3>
+                <p className="text-[12px] font-sans text-on-surface-variant mt-1">Choose source and target — M3 Expressive Type</p>
+              </div>
+              <span className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container grid place-items-center"><Plus size={16}/></span>
+            </div>
+            {capturing && <p className="mt-4 text-[12px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-4 py-2 text-center animate-pulse">Capturing… press a key ({capturing})</p>}
+            <div className="grid grid-cols-2 gap-4 mt-5">
+              <div>
+                <label className="text-[11px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
+                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-2 w-full h-11 rounded-[12px] bg-surface-container-high border border-outline-variant text-[13px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
-                <button onClick={()=>setCapturing("src")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border transition ${capturing==="src" ? "bg-white text-zinc-900 border-white" : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300"}`}>Capture source</button>
+                <button onClick={()=>setCapturing("src")} className={`mt-2 w-full h-9 rounded-full text-[12px] font-medium border transition-all duration-300 ease-m3-spring ${capturing==="src" ? "bg-primary text-on-primary border-primary shadow-m3-1 scale-[1.02]" : "bg-surface-container-high hover:bg-surface-container-highest border-outline-variant text-on-surface hover:shadow-sm"}`}>Capture source</button>
               </div>
               <div>
-                <label className="text-[10px] font-medium tracking-widest text-zinc-400">TARGET</label>
-                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-1 w-full h-9 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] font-mono px-3 text-white focus:outline-none focus:border-zinc-600">
+                <label className="text-[11px] font-medium tracking-widest text-on-surface-variant">TARGET</label>
+                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-2 w-full h-11 rounded-[12px] bg-surface-container-high border border-outline-variant text-[13px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
-                <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border transition ${capturing==="dst" ? "bg-white text-zinc-900 border-white" : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300"}`}>Capture target</button>
+                <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-9 rounded-full text-[12px] font-medium border transition-all duration-300 ease-m3-spring ${capturing==="dst" ? "bg-primary text-on-primary border-primary shadow-m3-1 scale-[1.02]" : "bg-surface-container-high hover:bg-surface-container-highest border-outline-variant text-on-surface hover:shadow-sm"}`}>Capture target</button>
               </div>
             </div>
-            <div className="flex items-center justify-center gap-2 mt-5">
-              <span className="px-3.5 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-200">{srcKey}</span>
-              <span className="w-6 h-6 rounded-full bg-white text-zinc-900 grid place-items-center text-[10px]">→</span>
-              <span className="px-3.5 py-1.5 rounded-full bg-white text-zinc-900 text-[11px] font-mono border border-zinc-200">{dstKey}</span>
+            <div className="flex items-center justify-center gap-3 mt-6 p-3 rounded-[16px] bg-surface-container-high border border-outline-variant">
+              <span className="px-4 py-2 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono text-on-surface shadow-sm min-w-[72px] text-center">{srcKey}</span>
+              <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium shadow-m3-1">→</span>
+              <span className="px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono border border-outline-variant shadow-sm min-w-[72px] text-center">{dstKey}</span>
             </div>
-            <div className="flex gap-2.5 mt-6">
-              <button onClick={()=>setShowAdd(false)} className="flex-1 h-9 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-[12px] font-medium transition">Cancel</button>
-              <button onClick={addMap} className="flex-1 h-9 rounded-full bg-white hover:bg-zinc-100 text-zinc-900 text-[12px] font-medium transition">Save mapping</button>
+            <div className="flex gap-3 mt-6">
+              <button onClick={()=>setShowAdd(false)} className="flex-1 h-11 rounded-full border-2 border-outline text-on-surface hover:bg-surface-container-high text-[13px] font-medium transition-all">Cancel</button>
+              <button onClick={addMap} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium transition-all shadow-m3-1 hover:shadow-m3-2 hover:scale-[1.01] active:scale-[0.98]">Save mapping</button>
             </div>
           </div>
         </div>
