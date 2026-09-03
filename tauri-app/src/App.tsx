@@ -236,7 +236,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 grid grid-cols-12 gap-4 p-4 max-w-[1440px] w-full mx-auto overflow-hidden" style={{ height: 'calc(100vh - 72px)' }}>
+      <div className="flex-1 min-h-0 grid grid-cols-12 gap-4 p-4 max-w-[1440px] w-full mx-auto overflow-hidden">
         {/* Left — Profiles — M3 Navigation Drawer expressive */}
         <aside className="col-span-12 lg:col-span-3 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
           <div className="px-5 pt-5 pb-4">
@@ -275,13 +275,13 @@ export default function App() {
                 <h2 className="text-[20px] font-display font-medium tracking-tight text-on-surface flex items-center gap-2.5"><span className="w-8 h-8 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center"><Keyboard size={16}/></span> {prof.display_name}</h2>
                 <p className="text-[13px] font-sans text-on-surface-variant mt-2 leading-relaxed max-w-[520px]">{prof.description}</p>
               </div>
-              <button onClick={()=>setShowAdd(true)} className="inline-flex h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-2 hover:shadow-m3-2 transition-all duration-300 ease-m3-emphasized active:scale-[0.98] shadow-m3-1"><Plus size={16} className="text-on-primary"/> Add</button>
+              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-2 hover:shadow-m3-2 transition-all duration-300 ease-m3-emphasized active:scale-[0.98] shadow-m3-1"><Plus size={16} className="text-on-primary"/> Add</button>
             </div>
           </div>
           <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-y border-outline-variant bg-surface-container-high">
             <span className="flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>{prof.mappings.length} MAPPINGS</span><span className="font-mono font-normal tracking-wide text-outline text-[10px]">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--md-sys-color-outline) transparent', maxHeight: 'calc(100vh - 220px)' } as React.CSSProperties}>
+          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-2 bg-surface-container">
             {prof.mappings.length===0 ? (
               <div className="py-16 text-center animate-m3-fade-in">
                 <div className="w-16 h-16 mx-auto rounded-[20px] bg-surface-container-high border border-outline-variant grid place-items-center text-outline shadow-m3-1"><Keyboard size={24}/></div>
