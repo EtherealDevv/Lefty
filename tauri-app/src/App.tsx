@@ -268,8 +268,8 @@ export default function App() {
           </div>
         </aside>
 
-        {/* Center — Mappings — M3 Card expressive */}
-        <main className="col-span-12 lg:col-span-6 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
+        {/* Center — Mappings — M3 Card expressive (expandido) */}
+        <main className="col-span-12 lg:col-span-9 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
           <div className="px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -309,31 +309,7 @@ export default function App() {
           </div>
         </main>
 
-        {/* Right — Status — M3 expressive panels (simplified) */}
-        <aside className="col-span-12 lg:col-span-3 space-y-3 overflow-y-auto min-h-0 pr-1 overscroll-contain">
-          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>STATUS</h3>
-              <span className={`px-3 py-1 rounded-full text-[11px] font-medium tracking-widest border shadow-sm ${enabled ? "bg-tertiary-container text-on-tertiary-container border-outline-variant" : "bg-surface-container-high border-outline-variant text-on-surface-variant"}`}>{enabled ? "LIVE" : "IDLE"}</span>
-            </div>
-            <div className={`mt-4 p-4 rounded-[16px] border transition-all ${enabled ? "bg-surface-container-high border-outline shadow-m3-1" : "bg-surface-container-high/50 border-outline-variant"}`}>
-              <div className="flex items-center gap-2.5">
-                <span className={`w-8 h-8 rounded-[12px] grid place-items-center ${enabled ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-highest text-outline border border-outline-variant"}`}><Activity size={16} /></span>
-                <div>
-                  <div className="text-[13px] font-medium text-on-surface font-mono">WH_KEYBOARD_LL</div>
-                  <div className="text-[11px] font-sans text-on-surface-variant">{enabled ? "Hook active • Ready" : "Hook paused"}</div>
-                </div>
-                {enabled && <span className="ml-auto w-2 h-2 rounded-full bg-tertiary animate-pulse shadow-[0_0_8px_var(--md-sys-color-tertiary)]" />}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button className="flex-1 h-10 rounded-full bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium transition-all shadow-sm">Export</button>
-            <button className="flex-1 h-10 rounded-full bg-primary text-on-primary text-[12px] font-medium transition-all shadow-m3-1 hover:shadow-m3-2 hover:scale-[1.01] active:scale-[0.99]">Import</button>
-          </div>
-          <p className="text-[10px] text-center tracking-wide font-mono text-on-surface-variant">Lefty v2 • Expressive • By Sycho • Rust</p>
-        </aside>
+        {/* Right eliminado — keymaps expandido a 9 cols para aprovechar ancho */}
       </div>
       {showAdd && (
         <div className="fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 animate-m3-fade-in" onClick={()=>setShowAdd(false)}>
