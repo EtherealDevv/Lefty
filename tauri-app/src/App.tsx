@@ -282,7 +282,7 @@ export default function App() {
           <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-y border-outline-variant bg-surface-container-high">
             <span className="flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>{prof.mappings.length} MAPPINGS</span><span className="font-mono font-normal tracking-wide text-outline text-[10px]">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container overscroll-contain scrollbar-thin" style={{ scrollbarGutter: 'stable' } as React.CSSProperties}>
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--md-sys-color-outline) transparent' } as React.CSSProperties}>
             {prof.mappings.length===0 ? (
               <div className="py-16 text-center animate-m3-fade-in">
                 <div className="w-16 h-16 mx-auto rounded-[20px] bg-surface-container-high border border-outline-variant grid place-items-center text-outline shadow-m3-1"><Keyboard size={24}/></div>
@@ -291,14 +291,14 @@ export default function App() {
                 <button onClick={()=>setShowAdd(true)} className="mt-6 h-10 px-6 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 transition-all">Add mapping</button>
               </div>
             ) : prof.mappings.map(([s,d])=>(
-              <div key={s} className="h-[56px] bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest hover:border-outline hover:shadow-m3-1 rounded-[16px] flex items-center px-4 gap-3 group transition-all duration-300 ease-m3-spring">
+              <div key={s} className="h-[56px] bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest hover:border-outline rounded-[16px] flex items-center px-4 gap-3 transition-colors duration-200">
                 <span className="px-3.5 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[12px] font-mono font-medium min-w-[72px] text-center text-on-surface shadow-sm">{s}</span>
-                <span className="w-7 h-7 rounded-full bg-primary text-on-primary grid place-items-center text-[12px] font-medium shadow-m3-1 group-hover:scale-110 transition-transform duration-300 ease-m3-spring">→</span>
+                <span className="w-7 h-7 rounded-full bg-primary text-on-primary grid place-items-center text-[12px] font-medium shadow-m3-1">→</span>
                 <span className="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[12px] font-mono font-medium min-w-[72px] text-center border border-outline-variant shadow-sm">{d}</span>
                 <span className="hidden sm:block text-[11px] font-sans text-on-surface-variant ml-1">remap</span>
-                <div className="ml-auto flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
-                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-secondary-container border border-outline-variant hover:border-outline text-on-surface-variant hover:text-on-secondary-container transition-colors"><ArrowLeftRight size={13}/></button>
-                  <button onClick={()=>delMap(s)} title="Delete" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-error-container border border-outline-variant hover:border-error text-on-surface-variant hover:text-on-error-container transition-colors"><Trash2 size={13}/></button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-secondary-container border border-outline-variant hover:border-outline text-on-surface-variant hover:text-on-secondary-container transition-colors active:scale-95"><ArrowLeftRight size={13}/></button>
+                  <button onClick={()=>delMap(s)} title="Delete" className="w-8 h-8 grid place-items-center rounded-full bg-surface-container-highest hover:bg-error-container border border-outline-variant hover:border-error text-on-surface-variant hover:text-on-error-container transition-colors active:scale-95"><Trash2 size={13}/></button>
                 </div>
               </div>
             ))}
