@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Gamepad2, Keyboard, Mouse, Plus, Trash2, ArrowLeftRight, Shield, Zap, Activity, Sparkles } from "lucide-react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Sparkles } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import laskIcon from "./LASK.png";
 
@@ -36,16 +36,13 @@ export default function App() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>(BUILTIN);
   const [enabled, setEnabled] = useState(true);
   const [invertMouse, setInvertMouse] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [srcKey, setSrcKey] = useState("W");
   const [dstKey, setDstKey] = useState("I");
   const [capturing, setCapturing] = useState<null | "src" | "dst">(null);
-  const [debugInfo, setDebugInfo] = useState("");
   const [allKeys, setAllKeys] = useState<string[]>(FALLBACK_ALL_KEYS);
 
   useEffect(() => {
-    invoke<boolean>("is_admin").then(setIsAdmin).catch(()=>{});
     invoke<[number, string][]>("get_key_name_list").then(list => {
       if (Array.isArray(list) && list.length > 10) {
         const names = list.map(([, name]) => name).filter(n => n && n !== "Undefined");
@@ -272,7 +269,7 @@ export default function App() {
           <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-y border-outline-variant bg-surface-container-high">
             <span className="flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>{prof.mappings.length} MAPPINGS</span><span className="font-mono font-normal tracking-wide text-outline text-[10px]">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-2 bg-surface-container">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container overscroll-contain scrollbar-thin" style={{ scrollbarGutter: 'stable' } as React.CSSProperties}>
             {prof.mappings.length===0 ? (
               <div className="py-16 text-center animate-m3-fade-in">
                 <div className="w-16 h-16 mx-auto rounded-[20px] bg-surface-container-high border border-outline-variant grid place-items-center text-outline shadow-m3-1"><Keyboard size={24}/></div>
@@ -299,8 +296,8 @@ export default function App() {
           </div>
         </main>
 
-        {/* Right — Status — M3 expressive panels */}
-        <aside className="col-span-12 lg:col-span-3 space-y-3 overflow-auto min-h-0 pr-1">
+        {/* Right — Status — M3 expressive panels (simplified) */}
+        <aside className="col-span-12 lg:col-span-3 space-y-3 overflow-y-auto min-h-0 pr-1 overscroll-contain">
           <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
             <div className="flex items-center justify-between">
               <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>STATUS</h3>
@@ -316,21 +313,6 @@ export default function App() {
                 {enabled && <span className="ml-auto w-2 h-2 rounded-full bg-tertiary animate-pulse shadow-[0_0_8px_var(--md-sys-color-tertiary)]" />}
               </div>
             </div>
-            {!isAdmin ? (
-              <div className="mt-3 p-3.5 rounded-[16px] bg-error-container/30 border border-outline-variant flex gap-3">
-                <span className="w-8 h-8 rounded-[12px] bg-error-container text-on-error-container grid place-items-center flex-shrink-0"><Shield size={14}/></span>
-                <div>
-                  <div className="text-[12px] font-medium text-on-surface">Admin required</div>
-                  <div className="text-[11px] leading-relaxed font-sans text-on-surface-variant mt-1">Some games need elevation. Run as admin for full coverage.</div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-3 p-3.5 rounded-[16px] bg-tertiary-container border border-outline-variant flex gap-3">
-                <span className="w-8 h-8 rounded-[12px] bg-tertiary text-on-tertiary grid place-items-center"><Shield size={14} /></span>
-                <div className="text-[12px] font-medium text-on-tertiary-container">Admin active</div>
-                <div className="text-[11px] font-sans text-on-tertiary-container/80">Elevation OK</div>
-              </div>
-            )}
           </div>
 
           <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
@@ -340,32 +322,6 @@ export default function App() {
               <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; setInvertMouse(v); invoke("set_invert_clicks", {enabled: v}).catch(()=>{}); }} className="w-11 h-[28px] rounded-full appearance-none bg-surface-container-highest border-2 border-outline checked:bg-primary checked:border-primary relative before:absolute before:w-5 before:h-5 before:rounded-full before:bg-outline before:top-[3px] before:left-[3px] checked:before:bg-on-primary checked:before:translate-x-[18px] before:transition-all before:ease-m3-spring before:duration-300 transition-colors duration-300" />
             </label>
             <p className="text-[11px] font-mono text-on-surface-variant mt-2 px-2">Windows native • 0ms • M3 tonal</p>
-          </div>
-
-          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-4 shadow-m3-1">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-[12px] bg-primary text-on-primary grid place-items-center shadow-m3-1"><Gamepad2 size={16} /></div>
-              <div>
-                <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface leading-none">GAMING</h3>
-                <p className="text-[12px] font-medium text-on-surface leading-none mt-1">Always optimized</p>
-              </div>
-              <span className="ml-auto text-[10px] font-mono bg-tertiary-container text-on-tertiary-container px-2 py-1 rounded-full border border-outline-variant">0.02ms</span>
-            </div>
-            <p className="text-[12px] leading-relaxed font-sans text-on-surface-variant mt-3">Native Rust engine • M3 Expressive • No gaming mode needed.</p>
-          </div>
-
-          <div className="bg-surface-container-high rounded-[16px] border border-outline-variant p-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-[12px] bg-surface-container-highest border border-outline-variant grid place-items-center text-on-surface-variant"><Mouse size={16}/></div>
-            <div>
-              <div className="text-[12px] font-medium text-on-surface font-display">How it works</div>
-              <div className="text-[11px] font-mono text-on-surface-variant">Hook • SendInput • return 1</div>
-            </div>
-          </div>
-
-          <div className="bg-surface-container rounded-[28px] border border-outline-variant p-3 shadow-m3-1">
-            <h3 className="text-[12px] font-display font-medium tracking-wide text-on-surface">DEBUG</h3>
-            <button onClick={async()=>{ try{ const info=await invoke<string>("get_debug_info"); setDebugInfo(info);}catch(e){setDebugInfo(String(e))} }} className="mt-3 w-full h-10 rounded-full bg-secondary-container text-on-secondary-container hover:bg-secondary-container/80 border border-outline-variant text-[12px] font-medium transition-all duration-300 ease-m3-emphasized shadow-sm hover:shadow-m3-1">Check mappings file</button>
-            <pre className="text-[10px] leading-relaxed font-mono text-on-surface-variant mt-3 whitespace-pre-wrap break-all max-h-28 overflow-auto bg-surface-container-high rounded-[12px] p-3 border border-outline-variant">{debugInfo || "No data"}</pre>
           </div>
 
           <div className="flex gap-2">
