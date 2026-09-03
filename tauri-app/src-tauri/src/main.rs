@@ -154,6 +154,80 @@ fn set_engine_enabled(enabled: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn set_hotkey(hotkey: String) -> Result<String, String> {
+    let path = if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        let _ = fs::create_dir_all(&dir);
+        dir.join("hotkey.txt")
+    } else {
+        PathBuf::from("hotkey.txt")
+    };
+    // Validar que sea una tecla conocida
+    if name_to_vk(&hotkey).is_none() {
+        return Err(format!("Hotkey '{}' no es una tecla válida", hotkey));
+    }
+    fs::write(&path, hotkey.trim().to_uppercase()).map_err(|e| e.to_string())?;
+    Ok(format!("hotkey set to {}", hotkey))
+}
+
+#[tauri::command]
+fn get_hotkey() -> Result<String, String> {
+    let path = if let Ok(appdata) = std::env::var("APPDATA") {
+        PathBuf::from(appdata).join("Lefty").join("hotkey.txt")
+    } else {
+        PathBuf::from("hotkey.txt")
+    };
+    Ok(fs::read_to_string(&path).unwrap_or_else(|_| "F6".to_string()).trim().to_uppercase())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<String, String> {
+    // Windows Run key (auto-start)
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_str = exe.to_string_lossy().to_string();
+    let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    // Usar reg.exe para no necesitar winreg crate
+    let status = if enabled {
+        std::process::Command::new("reg").args(["add", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe_str), "/f"]).output().map_err(|e| e.to_string())?
+    } else {
+        std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/f"]).output().map_err(|e| e.to_string())?
+    };
+    if !status.status.success() {
+        return Err(format!("reg failed: {:?}", status));
+    }
+    Ok(format!("autostart {}", enabled))
+}
+
+#[tauri::command]
+fn get_autostart() -> Result<bool, String> {
+    let out = std::process::Command::new("reg").args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "Lefty"]).output().map_err(|e| e.to_string())?;
+    Ok(out.status.success())
+}
+
+#[tauri::command]
+fn set_hide_to_tray(enabled: bool) -> Result<String, String> {
+    let path = if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        let _ = fs::create_dir_all(&dir);
+        dir.join("hide_tray.txt")
+    } else {
+        PathBuf::from("hide_tray.txt")
+    };
+    fs::write(&path, if enabled { b"1" } else { b"0" }).map_err(|e| e.to_string())?;
+    Ok(format!("hide_tray {}", enabled))
+}
+
+#[tauri::command]
+fn get_hide_to_tray() -> Result<bool, String> {
+    let path = if let Ok(appdata) = std::env::var("APPDATA") {
+        PathBuf::from(appdata).join("Lefty").join("hide_tray.txt")
+    } else {
+        PathBuf::from("hide_tray.txt")
+    };
+    Ok(fs::read_to_string(&path).map(|s| s.trim() == "1").unwrap_or(true))
+}
+
+#[tauri::command]
 fn get_f6_state() -> Result<bool, String> {
     get_engine_enabled()
 }
@@ -414,11 +488,18 @@ fn main() {
         })
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                // Check hide_to_tray setting (default true)
+                let hide = std::fs::read_to_string(
+                    std::env::var("APPDATA").map(|a| PathBuf::from(a).join("Lefty").join("hide_tray.txt")).unwrap_or(PathBuf::from("hide_tray.txt"))
+                ).map(|s| s.trim() != "0").unwrap_or(true);
+                if hide {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks])
+        .invoke_handler(tauri::generate_handler![is_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {

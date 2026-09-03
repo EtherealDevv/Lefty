@@ -4,29 +4,29 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Monochrome Material You - neutral tonal greys
+        // Monochrome Material 3 - #121212 / #FFFFFF
+        primary: {
+          DEFAULT: "#FFFFFF",
+          hover: "#F0F0F0",
+          container: "#2D2D2D",
+          on: "#000000",
+        },
         surface: {
-          DEFAULT: "#131316",
-          container: "#1E1E24",
-          high: "#28282F",
-          highest: "#33333A",
-          bright: "#3B3A42",
-          tint: "#1A1A1E",
+          DEFAULT: "#1C1C1C",
+          container: "#1C1C1C",
+          high: "#2D2D2D",
+          highest: "#3A3A3A",
+          bright: "#2D2D2D",
         },
         outline: {
-          DEFAULT: "#77767E",
-          variant: "#46464F",
-        },
-        primary: {
-          DEFAULT: "#C8C5D0",
-          hover: "#D0CEDA",
-          container: "#45444C",
-          on: "#2F2E33",
+          DEFAULT: "#8E8E8E",
+          variant: "#2D2D2D",
         },
         on: {
-          surface: "#E6E1EC",
-          variant: "#C7C5D0",
+          surface: "#E3E3E3",
+          variant: "#C6C6C6",
         },
+        background: "#121212",
       },
       fontFamily: {
         sans: ["Inter", "Segoe UI", "system-ui", "sans-serif"],

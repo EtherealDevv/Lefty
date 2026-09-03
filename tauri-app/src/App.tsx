@@ -200,9 +200,10 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-[#0A0A0F] text-zinc-100 flex flex-col overflow-hidden selection:bg-violet-500/30">
-      {/* Header - Professional, subtle, with depth */}
-      <header className="h-[68px] bg-zinc-900/80 backdrop-blur-xl border-b border-zinc-800 flex items-center justify-between px-7 sticky top-0 z-10">
+    <div className="h-screen bg-[#0A0A0F] text-zinc-100 flex flex-col overflow-hidden selection:bg-white/20 relative">
+      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-white/[0.02] pointer-events-none" />
+      {/* Header - Glassify Material Monochrome */}
+      <header className="h-[68px] bg-zinc-900/60 backdrop-blur-2xl border-b border-white/[0.06] flex items-center justify-between px-7 sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <div className="w-9 h-9 rounded-xl overflow-hidden ring-1 ring-zinc-700 shadow-sm">
             <img src={laskIcon} alt="Lefty" className="w-full h-full object-cover" />
@@ -231,15 +232,15 @@ export default function App() {
       </header>
 
       <div className="flex-1 min-h-0 grid grid-cols-12 gap-5 p-5 max-w-[1440px] w-full mx-auto overflow-hidden">
-        {/* Left - Profiles */}
-        <aside className="col-span-12 lg:col-span-3 bg-zinc-900 rounded-2xl border border-zinc-800 flex flex-col overflow-hidden min-h-0 shadow-sm">
-          <div className="px-4 pt-4 pb-3">
+        {/* Left - Profiles - Glassify Monochrome */}
+        <aside className="col-span-12 lg:col-span-3 bg-zinc-900/40 backdrop-blur-xl rounded-2xl border border-white/[0.06] flex flex-col overflow-hidden min-h-0 shadow-lg">
+          <div className="px-4 pt-4 pb-3 border-b border-white/[0.04]">
             <h2 className="text-[11px] font-semibold tracking-widest text-zinc-400">PROFILES</h2>
-            <p className="text-[12px] text-zinc-500 mt-1 leading-snug">Left-handed layouts, crafted for competitive play</p>
+            <p className="text-[11px] text-zinc-500 mt-1">Choose your left-handed layout</p>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto px-2.5 pb-3 space-y-1.5">
+          <div className="flex-1 min-h-0 overflow-auto p-2.5 pb-3 space-y-1.5">
             {Object.entries(profiles).map(([key, p]) => (
-              <button key={key} onClick={() => setActive(key)} className={`w-full text-left p-3 rounded-xl border transition-all flex items-center gap-3 ${active===key ? "bg-white border-white text-zinc-900 shadow-sm" : "bg-zinc-800/50 border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 text-zinc-100"}`}>
+              <button key={key} onClick={() => setActive(key)} className={`w-full text-left p-3 rounded-xl border transition-all flex items-center gap-3 backdrop-blur-sm ${active===key ? "bg-white border-white text-zinc-900 shadow-md" : "bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.06] hover:border-white/10 text-zinc-100"}`}>
                 <span className={`w-8 h-8 grid place-items-center rounded-lg text-[13px] font-medium flex-shrink-0 ${active===key ? "bg-zinc-900 text-white" : "bg-zinc-900 border border-zinc-800 text-zinc-400"}`}>{p.icon}</span>
                 <div className="flex-1 min-w-0">
                   <div className={`text-[13px] font-medium leading-none truncate ${active===key ? "text-zinc-900" : "text-white"}`}>{p.display_name}</div>

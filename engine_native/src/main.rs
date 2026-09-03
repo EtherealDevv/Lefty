@@ -5,7 +5,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
@@ -29,6 +29,7 @@ static mut G_HOOK: HHOOK = HHOOK(std::ptr::null_mut());
 static mut G_HOOK_COPY: HHOOK = HHOOK(std::ptr::null_mut());
 static RUNNING: AtomicBool = AtomicBool::new(true);
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static HOTKEY_VK: AtomicU32 = AtomicU32::new(0x75);
 
 fn get_state() -> Arc<Mutex<State>> {
     G_STATE.get_or_init(|| Arc::new(Mutex::new(State::new()))).clone()
@@ -66,18 +67,19 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         return CallNextHookEx(G_HOOK_COPY, n, w, l);
     }
 
-    // file-watch style F6 global toggle — exact handling, no file polling
-    // VK_F6 = 0x75 — on keydown, toggle ENABLED and suppress the original F6
-    if vk_raw == 0x75 && (w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize) {
+    // Custom hotkey (default F6) — native low-level, no file I/O in hot path except via HOTKEY_VK
+    let hotkey = HOTKEY_VK.load(Ordering::SeqCst);
+    if vk_raw == hotkey && (w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize) {
         let new_val = !ENABLED.load(Ordering::SeqCst);
         ENABLED.store(new_val, Ordering::SeqCst);
-        // Notify UI via file so Tauri's get_engine_enabled polling sees the toggle
-        // This is Lefty-specific notification, not Lefty file polling
         if let Ok(appdata) = env::var("APPDATA") {
             let p = PathBuf::from(appdata).join("Lefty").join("f6_toggle.txt");
             let _ = fs::create_dir_all(p.parent().unwrap());
             let _ = fs::write(&p, if new_val { b"1" } else { b"0" });
         }
+        return LRESULT(1);
+    }
+    if vk_raw == hotkey {
         return LRESULT(1);
     }
 
@@ -167,23 +169,53 @@ fn main() {
 
     // Watch mappings file — file-watch style settings event (file watch, not F6 polling)
     let mp2 = mp.clone();
-    std::thread::spawn(move || {
-        let mut last = fs::metadata(&mp2).and_then(|m| m.modified()).ok();
-        loop {
+    std::thread::spawn(move ||{
+        let mut last=fs::metadata(&mp2).and_then(|m| m.modified()).ok();
+        loop{
             std::thread::sleep(Duration::from_millis(300));
-            if let Ok(md) = fs::metadata(&mp2) {
-                if let Ok(mt) = md.modified() {
-                    if Some(mt) != last {
-                        last = Some(mt);
-                        if let Some(m) = load(&mp2) {
-                            set_mappings(m);
-                        }
+            if let Ok(md)=fs::metadata(&mp2){
+                if let Ok(mt)=md.modified(){
+                    if Some(mt)!=last{
+                        last=Some(mt);
+                        if let Some(m)=load(&mp2){ set_mappings(m); }
                     }
                 }
             }
-            if !RUNNING.load(Ordering::SeqCst) {
-                break;
+            if !RUNNING.load(Ordering::SeqCst){ break; }
+        }
+    });
+    // Watch hotkey file for custom hotkey (F6 default)
+    let hotkey_path = if let Ok(a) = env::var("APPDATA") { PathBuf::from(a).join("Lefty").join("hotkey.txt") } else { PathBuf::from("hotkey.txt") };
+    // Load initial hotkey
+    if let Ok(s) = fs::read_to_string(&hotkey_path) {
+        let n = s.trim().to_uppercase();
+        if let Some(vk) = match n.as_str() {
+            "F6"=>Some(0x75), "F7"=>Some(0x76), "F8"=>Some(0x77), "F9"=>Some(0x78), "F10"=>Some(0x79), "F11"=>Some(0x7A), "F12"=>Some(0x7B),
+            _=>None
+        } {
+            HOTKEY_VK.store(vk, Ordering::SeqCst);
+        }
+    }
+    let hotkey_path2 = hotkey_path.clone();
+    std::thread::spawn(move ||{
+        let mut last_hotkey = fs::read_to_string(&hotkey_path2).unwrap_or("F6".to_string());
+        loop{
+            std::thread::sleep(Duration::from_millis(500));
+            if let Ok(s) = fs::read_to_string(&hotkey_path2) {
+                let n = s.trim().to_uppercase();
+                if n != last_hotkey.trim().to_uppercase() {
+                    last_hotkey = s.clone();
+                    let vk = match n.as_str() {
+                        "F6"=>Some(0x75), "F7"=>Some(0x76), "F8"=>Some(0x77), "F9"=>Some(0x78), "F10"=>Some(0x79), "F11"=>Some(0x7A), "F12"=>Some(0x7B),
+                        "F1"=>Some(0x70), "F2"=>Some(0x71), "F3"=>Some(0x72), "F4"=>Some(0x73), "F5"=>Some(0x74),
+                        _=>None
+                    };
+                    if let Some(v) = vk {
+                        HOTKEY_VK.store(v, Ordering::SeqCst);
+                    }
+                }
             }
+            if !RUNNING.load(Ordering::SeqCst){ break; }
         }
     });
 

@@ -2,7 +2,7 @@
 name = "lefty_engine"
 version = "0.1.0"
 edition = "2021"
-description = "Lefty native engine - low-level keyboard hook (WH_KEYBOARD_LL, SendInput, TIME_CRITICAL, no GIL)
+description = "Lefty native engine - low-level keyboard hook (WH_KEYBOARD_LL, SendInput, TIME_CRITICAL, no GIL)"
 authors = ["Lefty"]
 license = "MIT"
 
