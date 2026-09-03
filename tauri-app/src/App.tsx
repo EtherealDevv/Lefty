@@ -213,10 +213,9 @@ export default function App() {
           <div className="leading-none">
             <div className="flex items-baseline gap-2.5">
               <h1 className="text-[22px] font-display font-medium tracking-tight text-on-surface">Lefty</h1>
-              <span className="text-[11px] font-medium tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant px-2 py-0.5 rounded-full">v2 • Expressive</span>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-tertiary bg-tertiary-container border border-outline-variant px-2 py-0.5 rounded-full"><Sparkles size={11}/>M3 2025</span>
+              <span className="text-[11px] font-medium tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant px-2 py-0.5 rounded-full">v2</span>
             </div>
-            <p className="text-[12px] font-sans tracking-wide text-on-surface-variant mt-1">By Sycho <span className="text-outline">·</span> Left-handed • Monochrome #121212</p>
+            <p className="text-[12px] font-sans tracking-wide text-on-surface-variant mt-1">By Sycho <span className="text-outline">·</span> Left-handed • Monochrome</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -237,12 +236,12 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 grid grid-cols-12 gap-4 p-4 max-w-[1440px] w-full mx-auto overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-12 gap-4 p-4 max-w-[1440px] w-full mx-auto overflow-hidden" style={{ height: 'calc(100vh - 72px)' }}>
         {/* Left — Profiles — M3 Navigation Drawer expressive */}
         <aside className="col-span-12 lg:col-span-3 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
           <div className="px-5 pt-5 pb-4">
             <h2 className="text-[13px] font-display font-medium tracking-wide text-on-surface flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-primary"/>PROFILES</h2>
-            <p className="text-[12px] font-sans leading-relaxed text-on-surface-variant mt-1.5">Choose your left-handed layout — expressive M3</p>
+            <p className="text-[12px] font-sans leading-relaxed text-on-surface-variant mt-1.5">Choose your left-handed layout</p>
           </div>
           <div className="flex-1 min-h-0 overflow-auto px-3 pb-3 space-y-2">
             {Object.entries(profiles).map(([key, p]) => (
@@ -276,18 +275,18 @@ export default function App() {
                 <h2 className="text-[20px] font-display font-medium tracking-tight text-on-surface flex items-center gap-2.5"><span className="w-8 h-8 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center"><Keyboard size={16}/></span> {prof.display_name}</h2>
                 <p className="text-[13px] font-sans text-on-surface-variant mt-2 leading-relaxed max-w-[520px]">{prof.description}</p>
               </div>
-              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-2 hover:shadow-m3-2 transition-all duration-300 ease-m3-emphasized active:scale-[0.98] shadow-m3-1"><Plus size={16} className="text-on-primary"/> Add</button>
+              <button onClick={()=>setShowAdd(true)} className="inline-flex h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-2 hover:shadow-m3-2 transition-all duration-300 ease-m3-emphasized active:scale-[0.98] shadow-m3-1"><Plus size={16} className="text-on-primary"/> Add</button>
             </div>
           </div>
           <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-y border-outline-variant bg-surface-container-high">
             <span className="flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>{prof.mappings.length} MAPPINGS</span><span className="font-mono font-normal tracking-wide text-outline text-[10px]">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--md-sys-color-outline) transparent' } as React.CSSProperties}>
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-surface-container" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--md-sys-color-outline) transparent', maxHeight: 'calc(100vh - 220px)' } as React.CSSProperties}>
             {prof.mappings.length===0 ? (
               <div className="py-16 text-center animate-m3-fade-in">
                 <div className="w-16 h-16 mx-auto rounded-[20px] bg-surface-container-high border border-outline-variant grid place-items-center text-outline shadow-m3-1"><Keyboard size={24}/></div>
                 <p className="text-[15px] font-display font-medium text-on-surface mt-4">No mappings</p>
-                <p className="text-[13px] font-sans text-on-surface-variant">Add your first remap to start — expressive</p>
+                <p className="text-[13px] font-sans text-on-surface-variant">Add your first remap to start</p>
                 <button onClick={()=>setShowAdd(true)} className="mt-6 h-10 px-6 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 transition-all">Add mapping</button>
               </div>
             ) : prof.mappings.map(([s,d])=>(
@@ -304,8 +303,8 @@ export default function App() {
             ))}
           </div>
           <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-between">
-            <span className="text-[11px] font-mono text-on-surface-variant">{prof.mappings.length} active • M3 Expressive</span>
-            <button onClick={()=>setShowAdd(true)} className="sm:hidden h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 flex items-center gap-1.5"><Plus size={14}/>Add</button>
+            <span className="text-[11px] font-mono text-on-surface-variant">{prof.mappings.length} active</span>
+            <button onClick={()=>setShowAdd(true)} className="h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 flex items-center gap-1.5"><Plus size={14}/>Add</button>
           </div>
         </main>
 
@@ -317,7 +316,7 @@ export default function App() {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-[20px] font-display font-medium text-on-surface">Add mapping</h3>
-                <p className="text-[12px] font-sans text-on-surface-variant mt-1">Choose source and target — M3 Expressive Type</p>
+                <p className="text-[12px] font-sans text-on-surface-variant mt-1">Choose source and target</p>
               </div>
               <span className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container grid place-items-center"><Plus size={16}/></span>
             </div>
@@ -358,7 +357,7 @@ export default function App() {
                 <span className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center shadow-m3-1"><Settings size={18}/></span>
                 <div>
                   <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Settings</h3>
-                  <p className="text-[11px] font-sans text-on-surface-variant mt-1">Didáctico • Todo explicado • M3 Expressive monochrome</p>
+                  <p className="text-[11px] font-sans text-on-surface-variant mt-1">Didáctico • Todo explicado</p>
                 </div>
               </div>
               <button onClick={()=> setShowSettings(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-surface-container-high grid place-items-center text-on-surface-variant hover:text-on-surface">✕</button>
