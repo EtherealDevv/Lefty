@@ -304,7 +304,7 @@ export default function App() {
           </div>
           <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-between">
             <span className="text-[11px] font-mono text-on-surface-variant">{prof.mappings.length} active</span>
-            <button onClick={()=>setShowAdd(true)} className="h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 flex items-center gap-1.5"><Plus size={14}/>Add</button>
+            <button onClick={()=>setShowAdd(true)} className="sm:hidden h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 flex items-center gap-1.5"><Plus size={14}/>Add</button>
           </div>
         </main>
 
