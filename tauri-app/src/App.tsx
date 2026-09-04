@@ -125,16 +125,17 @@ export default function App() {
   const prof = profiles[active];
   const toggle = async () => {
     try {
-      if (enabled) {
-        await invoke("set_engine_enabled", {enabled: false}).catch(()=>{});
-        await invoke("stop_engine");
-        setEnabled(false);
-      } else {
-        await invoke("set_engine_enabled", {enabled: true}).catch(()=>{});
+      const next = !enabled;
+      await invoke("set_engine_enabled", {enabled: next}).catch(()=>{});
+      if (next) {
         await invoke("update_mappings", { mappings: prof.mappings });
         await invoke("start_engine", { profile: active });
-        setEnabled(true);
+      } else {
+        await invoke("stop_engine");
       }
+      setEnabled(next);
+      setLaunchActive(next);
+      try { localStorage.setItem("lefty_launch_active", String(next)); } catch {}
     } catch {
       setEnabled(!enabled);
     }
