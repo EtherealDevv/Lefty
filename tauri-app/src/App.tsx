@@ -224,7 +224,7 @@ export default function App() {
               <h1 className="text-[17px] font-display font-semibold tracking-tight text-on-surface">Lefty</h1>
               <span className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">v2</span>
             </div>
-            <p className="text-[11px] font-medium tracking-wide text-on-surface-variant mt-[2px]">By Sycho <span className="text-outline">·</span> Left-handed • Monochrome</p>
+            <p className="text-[11px] font-medium tracking-wide text-on-surface-variant mt-[2px]">By Sycho <span className="text-outline">·</span> Left-handed</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -373,7 +373,7 @@ export default function App() {
                 <span className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center"><Settings size={18}/></span>
                 <div>
                   <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Settings</h3>
-                  <p className="text-[11px] text-on-surface-variant mt-1">Educational • All explained • Monochrome</p>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Educational • All explained</p>
                 </div>
               </div>
               <button onClick={()=> setShowSettings(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-error-container hover:border-error hover:text-on-error-container grid place-items-center text-on-surface-variant transition-colors">✕</button>
