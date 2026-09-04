@@ -45,6 +45,7 @@ export default function App() {
   const [hideToTray, setHideToTray] = useState(true);
   const [hotkey, setHotkey] = useState("F6");
   const [hotkeyOptions] = useState(["F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"]);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<[number, string][]>("get_key_name_list").then(list => {
@@ -288,7 +289,7 @@ export default function App() {
                 <span className="hidden sm:block text-[11px] text-on-surface-variant ml-1">remap</span>
                 <div className="ml-auto flex items-center gap-1">
                   <button onClick={()=>swapMap(s,d)} title="Swap" className="w-7 h-7 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container"><ArrowLeftRight size={11}/></button>
-                  <button onClick={()=>delMap(s)} title="Delete" className="w-7 h-7 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-error-container hover:text-on-error-container"><Trash2 size={11}/></button>
+                  <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-7 h-7 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-error-container hover:text-on-error-container hover:border-error transition-colors"><Trash2 size={11}/></button>
                 </div>
               </div>
             ))}
@@ -329,6 +330,23 @@ export default function App() {
             <div className="flex gap-3 mt-6">
               <button onClick={()=>setShowAdd(false)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[13px] font-medium shadow-sm">Cancel</button>
               <button onClick={addMap} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.98]">Save mapping</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-scrim/70 backdrop-blur-sm grid place-items-center z-[60] p-4" onClick={()=> setConfirmDelete(null)}>
+          <div className="w-full max-w-[420px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 p-6" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-start gap-4">
+              <span className="w-11 h-11 rounded-[14px] bg-error-container text-on-error-container grid place-items-center flex-shrink-0 shadow-m3-1"><Trash2 size={20}/></span>
+              <div className="flex-1">
+                <h3 className="text-[16px] font-display font-medium text-on-surface leading-none">Are you sure to delete this keymap?</h3>
+                <p className="text-[12px] leading-relaxed text-on-surface-variant mt-2">This will permanently delete <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full text-on-surface">{confirmDelete} → {profiles[active].mappings.find(([s])=> s===confirmDelete)?.[1] || ""}</span> from <span className="font-medium text-on-surface">{prof.display_name}</span>. This action cannot be undone.</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={()=> setConfirmDelete(null)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[13px] font-medium">Cancel</button>
+              <button onClick={()=> { if(confirmDelete) delMap(confirmDelete); setConfirmDelete(null); }} className="flex-1 h-11 rounded-full bg-error text-on-error text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2">Delete</button>
             </div>
           </div>
         </div>
