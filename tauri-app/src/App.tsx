@@ -46,7 +46,9 @@ export default function App() {
   const [hotkey, setHotkey] = useState("F6");
   const [hotkeyOptions] = useState(["F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [launchActive, setLaunchActive] = useState(true);
+  const [launchActive, setLaunchActive] = useState(() => {
+    try { const v = localStorage.getItem("lefty_launch_active"); return v === null ? true : v === "true"; } catch { return true; }
+  });
 
   useEffect(() => {
     invoke<[number, string][]>("get_key_name_list").then(list => {
@@ -62,8 +64,7 @@ export default function App() {
     invoke<boolean>("get_autostart").then(setAutostart).catch(()=>{});
     invoke<boolean>("get_hide_to_tray").then(setHideToTray).catch(()=>{});
     invoke<string>("get_hotkey").then(v=> v && setHotkey(v.toUpperCase())).catch(()=>{});
-    invoke<boolean>("get_engine_enabled").then(v=> { setEnabled(v); setLaunchActive(v); }).catch(()=>{});
-    try { const la = localStorage.getItem("lefty_launch_active"); if (la !== null) setLaunchActive(la === "true"); } catch {}
+    invoke<boolean>("get_engine_enabled").then(setEnabled).catch(()=>{});
   }, []);
 
   useEffect(() => {
@@ -385,7 +386,7 @@ export default function App() {
               <div className="space-y-3">
                 <h4 className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>GENERAL</h4>
                 <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
-                  <span className="w-9 h-9 rounded-[12px] bg-primary-container text-on-primary-container grid place-items-center flex-shrink-0"><Activity size={16}/></span>
+                  <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Activity size={16}/></span>
                   <div className="flex-1">
                     <div className="text-[13px] font-medium text-on-surface">Launch with remaps active</div>
                     <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">When enabled, Lefty opens with your keymaps active. When disabled, it starts paused — press Activate or {hotkey} to enable.</div>
