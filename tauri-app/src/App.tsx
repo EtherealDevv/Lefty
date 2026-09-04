@@ -143,14 +143,11 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      let shouldEnable = true;
+      let shouldEnable = false;
       try { const v = localStorage.getItem("lefty_launch_active"); if (v !== null) shouldEnable = v === "true"; } catch {}
-      if (shouldEnable) {
-        invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
-        setEnabled(true);
-      } else {
-        setEnabled(false);
-      }
+      invoke("set_engine_enabled", {enabled: shouldEnable}).catch(()=>{});
+      setEnabled(shouldEnable);
+      invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
     }, 400);
     const id = setInterval(async () => {
       try {
