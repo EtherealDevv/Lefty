@@ -308,7 +308,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-3 mt-4 items-start">
               <div>
                 <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
-                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
+                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-full bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
                 <button onClick={()=>setCapturing("src")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture source</button>
@@ -321,14 +321,14 @@ export default function App() {
                 <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture target</button>
               </div>
             </div>
-            <div className="flex items-center justify-center gap-2 mt-5">
-              <span className="px-3.5 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[11px] font-mono text-on-surface">{srcKey}</span>
-              <span className="w-6 h-6 rounded-full bg-primary text-on-primary grid place-items-center text-[10px]">→</span>
-              <span className="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[11px] font-mono border border-outline-variant">{dstKey}</span>
+            <div className="flex items-center justify-center gap-3 mt-5 p-3 rounded-[16px] bg-surface-container-high border border-outline-variant">
+              <span className="px-4 py-2 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono text-on-surface min-w-[72px] text-center shadow-sm">{srcKey}</span>
+              <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium shadow-m3-1">→</span>
+              <span className="px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono border border-outline-variant min-w-[72px] text-center shadow-sm">{dstKey}</span>
             </div>
-            <div className="flex gap-2.5 mt-6">
-              <button onClick={()=>setShowAdd(false)} className="flex-1 h-9 rounded-full border border-outline-variant text-on-surface text-[12px] font-medium">Cancel</button>
-              <button onClick={addMap} className="flex-1 h-9 rounded-full bg-primary text-on-primary text-[12px] font-medium">Save mapping</button>
+            <div className="flex gap-3 mt-6">
+              <button onClick={()=>setShowAdd(false)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[13px] font-medium shadow-sm">Cancel</button>
+              <button onClick={addMap} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.98]">Save mapping</button>
             </div>
           </div>
         </div>
