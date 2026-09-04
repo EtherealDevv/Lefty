@@ -341,7 +341,7 @@ export default function App() {
                 <span className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center"><Settings size={18}/></span>
                 <div>
                   <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Settings</h3>
-                  <p className="text-[11px] text-on-surface-variant mt-1">Didáctico • Todo explicado • Monochrome</p>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Educational • All explained • Monochrome</p>
                 </div>
               </div>
               <button onClick={()=> setShowSettings(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant grid place-items-center text-on-surface-variant">✕</button>
@@ -349,15 +349,15 @@ export default function App() {
             <div className="flex-1 overflow-auto p-4 space-y-4 bg-surface-container">
               <div className="rounded-xl bg-primary-container/20 border border-outline-variant p-3 flex gap-3">
                 <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center flex-shrink-0"><Lightbulb size={14}/></span>
-                <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">Cómo funciona:</span> Lefty usa <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">WH_KEYBOARD_LL</span> + <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SendInput</span> en Rust (0.02ms). Activa el perfil antes de abrir el juego y usa <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">{hotkey}</span> para pausar.</p>
+                <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">How it works:</span> Lefty uses <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">WH_KEYBOARD_LL</span> + <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SendInput</span> in Rust (0.02ms). Activate profile before launching game and use <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">{hotkey}</span> to pause.</p>
               </div>
               <div className="space-y-3">
                 <h4 className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>GENERAL</h4>
                 <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
                   <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Power size={16}/></span>
                   <div className="flex-1">
-                    <div className="text-[13px] font-medium text-on-surface">Iniciar con Windows</div>
-                    <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Abre Lefty al encender el PC. Usa la clave Run del registro, sin servicios.</div>
+                    <div className="text-[13px] font-medium text-on-surface">Launch at startup</div>
+                    <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Launch Lefty when Windows starts. Uses registry Run key, no services.</div>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={autostart} onChange={e=>{ const v=e.target.checked; setAutostart(v); invoke("set_autostart",{enabled:v}).catch(()=>{}); }} className="sr-only peer" />
@@ -367,8 +367,8 @@ export default function App() {
                 <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
                   <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><EyeOff size={16}/></span>
                   <div className="flex-1">
-                    <div className="text-[13px] font-medium text-on-surface">Cerrar a bandeja</div>
-                    <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">El botón X deja Lefty en la bandeja. Click izquierdo muestra, derecho cierra.</div>
+                    <div className="text-[13px] font-medium text-on-surface">Close to tray</div>
+                    <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">X button minimizes to tray. Left click shows, right click closes.</div>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={hideToTray} onChange={e=>{ const v=e.target.checked; setHideToTray(v); invoke("set_hide_to_tray",{enabled:v}).catch(()=>{}); }} className="sr-only peer" />
@@ -377,13 +377,13 @@ export default function App() {
                 </div>
               </div>
               <div className="space-y-3">
-                <h4 className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>ENTRADA</h4>
+                <h4 className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>INPUT</h4>
                 <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4">
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-[12px] bg-tertiary-container text-on-tertiary-container grid place-items-center flex-shrink-0"><Mouse size={16}/></span>
                     <div className="flex-1">
-                      <div className="text-[13px] font-medium text-on-surface">Ratón para zurdos — invertir clicks</div>
-                      <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Intercambia botón primario/secundario con <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Se restaura al salir.</div>
+                      <div className="text-[13px] font-medium text-on-surface">Left-handed mouse — invert clicks</div>
+                      <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Swap primary/secondary button with <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Restored on exit.</div>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer ml-2">
                       <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; setInvertMouse(v); invoke("set_invert_clicks",{enabled:v}).catch(()=>{}); try{localStorage.setItem("lefty_invert",String(v));}catch{}}} className="sr-only peer" />
@@ -395,13 +395,13 @@ export default function App() {
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-[12px] bg-primary-container text-on-primary-container grid place-items-center flex-shrink-0"><KeyboardOff size={16}/></span>
                     <div className="flex-1">
-                      <div className="text-[13px] font-medium text-on-surface">Hotkey global para pausar</div>
-                      <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Tecla que pausa/reanuda remapeos sin cerrar Lefty. Por defecto <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">F6</span>.</div>
+                      <div className="text-[13px] font-medium text-on-surface">Global hotkey to pause</div>
+                      <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Key to pause/resume remaps without closing Lefty. Default <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">F6</span>.</div>
                       <div className="mt-3 flex items-center gap-2">
                         <select value={hotkey} onChange={e=>{ const v=e.target.value; setHotkey(v); invoke("set_hotkey",{hotkey:v}).catch(()=>{}); }} className="h-10 rounded-xl bg-surface-container-highest border border-outline-variant text-[13px] font-mono px-3 text-on-surface min-w-[110px]">
                           {hotkeyOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                         </select>
-                        <span className="text-[11px] text-on-surface-variant">Se guarda en <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">%APPDATA%\Lefty\hotkey.txt</span></span>
+                        <span className="text-[11px] text-on-surface-variant">Saved to <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">%APPDATA%\Lefty\hotkey.txt</span></span>
                       </div>
                     </div>
                   </div>
@@ -409,8 +409,8 @@ export default function App() {
               </div>
             </div>
             <div className="p-4 border-t border-outline-variant bg-surface-container-high flex gap-3">
-              <button onClick={()=> setShowSettings(false)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[13px] font-medium">Cerrar</button>
-              <button onClick={()=> setShowSettings(false)} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium">Hecho</button>
+              <button onClick={()=> setShowSettings(false)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[13px] font-medium">Close</button>
+              <button onClick={()=> setShowSettings(false)} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium">Done</button>
             </div>
           </div>
         </div>
