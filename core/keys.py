@@ -1,5 +1,5 @@
 """
-Lefty - Definición de teclas y códigos virtuales
+Lefty - Key definitions and virtual codes
 native low-level engine — no improvisation (no OEM expansion, no VkKeyScan, no scan priority)
 Basado en Win32 Virtual-Key Codes y Helpers::IsExtendedKey / GetCombinedKey
 """

@@ -4,17 +4,17 @@ Driver kernel oblitum/Interception: intercepta a nivel hardware, por debajo de G
 
 Ventajas para Minecraft:
 - WH_KEYBOARD_LL (Lefty
-- Interception está POR DEBAJO → Minecraft sí ve el remapeo, incluso GetAsyncKeyState
+- Interception is BELOW → Minecraft does see remap, even GetAsyncKeyState
 
-Instalación (una vez, requiere reboot):
+Installation (once, requires reboot):
   1. Descarga Interception.zip de https://github.com/oblitum/Interception/releases
   2. Descomprime → cmd ADMIN: install-interception.exe /install
   3. Reinicia PC
   4. pip install interception
   5. En Lefty selecciona Ultra o Sycho universal
 
-Si no está instalado, Lefty usa LL hook y avisa que Minecraft necesita Ultra.
-Este módulo implementa el loop real de Interception cuando está disponible.
+If not installed, Lefty uses LL hook and warns Minecraft needs Ultra.
+This module implements the real Interception loop when available.
 """
 import shutil
 import os
@@ -71,7 +71,7 @@ def get_interception_status() -> dict:
             "3. Reinicia PC (obligatorio)\n"
             "4. pip install interception\n"
             "5. Reinicia Lefty y selecciona 'Ultra' o activa Sycho\n"
-            "Con LL hook (Baja) Roblox sí, Minecraft no (usa raw input).\n"
+            "With LL hook (Low) Roblox yes, Minecraft no (uses raw input).\n"
             "Con Interception (Ultra) AMBOS funcionan, 0.3ms."
         )
     }
@@ -86,7 +86,7 @@ def _vk_to_scancode(vk: int) -> int:
 
 class InterceptionRemapper:
     """
-    Universal remapper vía Interception driver.
+    Universal remapper via Interception driver.
     Intercepta scanCodes a nivel kernel y reinyecta con scanCode remapeado.
     Funciona en Minecraft (GLFW), Valorant (Vanguard no lo bloquea si es driver firmado?), Roblox, etc.
     """
@@ -94,7 +94,7 @@ class InterceptionRemapper:
         self._thread = None
         self._running = False
         self._sc_map = {}  # scan -> scan dst
-        self._vk_map = {}  # también guardamos VK para debug
+        self._vk_map = {}  # also store VK for debug
         self._invert_clicks = False
 
     def set_mappings(self, vk_map: dict):
@@ -107,17 +107,17 @@ class InterceptionRemapper:
             dst_sc = _vk_to_scancode(dst_vk)
             if src_sc and dst_sc:
                 sc_map[src_sc] = dst_sc
-                # También manejar extended: Interception state bit 1 = extended
+                # Also handle extended: Interception state bit 1 = extended
                 # Para RCTRL/RALT etc, scan + extended flag
                 # Simplificamos: si VK es extended, marcar en sc_map con flag
                 # Por ahora, sc_map solo para no-extended; extendidos los manejamos aparte
-        # Expandir Ñ robusto: si 0xBA mapeado, asegurar que scan 0x27 también
+        # Expand Ñ robustly: if 0xBA mapped, ensure scan 0x27 also
         # 0xBA scan es 0x27, así que ya está, pero por si VK->scan falló, forzar
         if 0xBA in vk_map:
             dst = vk_map[0xBA]
             dst_sc = _vk_to_scancode(dst)
             if dst_sc:
-                sc_map[0x27] = dst_sc  # scan físico de Ñ/; 
+                sc_map[0x27] = dst_sc  # physical scan for Ñ/; 
         self._sc_map = sc_map
         self._vk_map = dict(vk_map)
         print(f"[Interception] Scan map universal {len(sc_map)} entries")
@@ -126,8 +126,8 @@ class InterceptionRemapper:
 
     def set_mouse_invert(self, enabled: bool):
         self._invert_clicks = enabled
-        # Para mouse universal, Interception también intercepta mouse si se pone filtro mouse
-        # Por ahora usamos SwapMouseButton para mouse (0ms) que también es universal y más simple
+        # For universal mouse, Interception también intercepta mouse si se pone filtro mouse
+        # For now use SwapMouseButton for mouse (0ms) which is also universal and simpler
         try:
             ctypes.windll.user32.SwapMouseButton(enabled)
             print(f"[Interception] Mouse invert {'ON' if enabled else 'OFF'}")
@@ -156,10 +156,10 @@ class InterceptionRemapper:
     def stop(self):
         self._running = False
         if self._thread and self._thread.is_alive():
-            # Interception wait es bloqueante, no hay unblcok fácil, dejamos que timeout o siguiente tecla lo despierte
-            # Enviamos una tecla dummy para despertar wait() si está bloqueado
+            # Interception wait is blocking, no easy unblock, let timeout or next key wake it
+            # Send dummy key to wake wait() if blocked
             try:
-                # No hay forma limpia sin driver, solo marcamos flag y dejamos que thread muera en próximo evento
+                # No clean way without driver, just set flag and let thread die on next event
                 self._thread.join(timeout=1.0)
             except:
                 pass
@@ -186,7 +186,7 @@ class InterceptionRemapper:
                     if interception.is_keyboard(device):
                         # stroke es KeyStroke con .code (scanCode) y .state
                         # state: 0 = down, 1 = up, 2 = extended down, 3 = extended up, etc.
-                        # Chequear dwExtraInfo no aplica aquí, Interception no usa extraInfo
+                        # Check dwExtraInfo not applicable here, Interception does not use extraInfo
                         sc = stroke.code & 0x7F  # scan sin extended
                         is_extended = (stroke.state & 0x02) != 0  # E0 flag
                         is_up = (stroke.state & 0x01) != 0
@@ -199,7 +199,7 @@ class InterceptionRemapper:
                             # Remapear: cambiar scanCode, mantener state (up/down, extended)
                             stroke.code = dst_sc
                             # Si destino es extended (ej RCTRL), marcar extended
-                            # Para Vk que eran extended, su scan ya tiene extended flag, pero Interception lo maneja vía state
+                            # For VKs that were extended, their scan already has extended flag, but Interception handles via state
                             # Simplificamos: no cambiamos extended, solo code
                         c.send(device, stroke)
                     elif interception.is_mouse(device) and self._invert_clicks:
@@ -207,7 +207,7 @@ class InterceptionRemapper:
                         # flags: 0x01 left down, 0x02 left up, 0x04 right down, 0x08 right up
                         # Invertir L<->R
                         # MouseStroke.state? En lib, MouseStroke tiene .state y .flags?
-                        # Según docs, MouseStroke.flags indica botones
+                        # Per docs, MouseStroke.flags indicates buttons
                         # Hacemos swap flags
                         try:
                             # Intentar swap flags si tiene
@@ -217,7 +217,7 @@ class InterceptionRemapper:
                                 new_flags = flags
                                 # left down (0x01) <-> right down (0x04)? Actually right down es 0x04? Chequear
                                 # En win32, MOUSEEVENTF_LEFTDOWN 0x02, RIGHTDOWN 0x08, pero Interception usa otros?
-                                # Para simplificar, swap 0x01<->0x02 y 0x04<->0x08 según lib
+                                # For simplicity, swap 0x01<->0x02 y 0x04<->0x08 según lib
                                 # Probamos generico: si tiene left down, poner right down
                                 # Como no tenemos doc exacta, dejamos sin hook mouse y usamos SwapMouseButton ya aplicado
                                 pass

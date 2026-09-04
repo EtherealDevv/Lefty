@@ -263,12 +263,12 @@ def isolated_main(mappings_queue=None, stop_event=None, initial_mappings=None):
     if not _g_hook_handle:
         _g_hook_handle = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _g_hook_proc_ptr, 0, 0)
     if not _g_hook_handle:
-        print(f"[LeftyEngine] SetWindowsHookEx falló {kernel32.GetLastError()}", flush=True)
+        print(f"[LeftyEngine] SetWindowsHookEx failed {kernel32.GetLastError()}", flush=True)
         return
     _g_hook_handle_copy = _g_hook_handle
     tid = kernel32.GetCurrentThreadId()
     print(f"[LeftyEngine] PID={os.getpid()} Hook={_g_hook_handle} TID={tid} modo=native", flush=True)
-    print(f"[LeftyEngine] Esperando mappings vía queue...", flush=True)
+    print(f"[LeftyEngine] Waiting for mappings via queue...", flush=True)
 
     import threading
     _poll_tid = tid

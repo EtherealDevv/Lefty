@@ -219,7 +219,7 @@ class LeftyRemapper:
             sc, fl, _ = send_map.get(s, (0,0,0))
             print(f"  {s:02X} -> {d:02X} (scan {sc:02X} flags {fl:X})")
         if len(vk_map) > 12:
-            print(f"  ... +{len(vk_map)-12} más")
+            print(f"  ... +{len(vk_map)-12} more")
 
     def set_mouse_invert(self, enabled: bool):
         self._invert_clicks = enabled
@@ -227,7 +227,7 @@ class LeftyRemapper:
             if self._invert_clicks_original is None:
                 self._invert_clicks_original = bool(user32.GetSystemMetrics(23))
             user32.SwapMouseButton(enabled)
-            print(f"[Lefty] Inversión clicks {'ACTIVADA' if enabled else 'DESACTIVADA'} (SwapMouseButton 0ms)")
+            print(f"[Lefty] Click inversion {'ACTIVADA' if enabled else 'DESACTIVADA'} (SwapMouseButton 0ms)")
         except Exception as e:
             print(f"[Lefty] Error SwapMouseButton: {e}")
 
@@ -361,7 +361,7 @@ class LeftyRemapper:
             self.hook_handle = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self.hook_proc_ptr, mod_handle, 0)
         if not self.hook_handle:
             err = kernel32.GetLastError()
-            print(f"[Lefty] ERROR SetWindowsHookEx falló: {err}")
+            print(f"[Lefty] ERROR SetWindowsHookEx failed: {err}")
             self.running = False
             return
         self.hook_handle_copy = self.hook_handle
@@ -425,7 +425,7 @@ class LeftyRemapper:
                 print(f"[Lefty][Watchdog] Hook reinstalado ok handle={h}")
                 return True
             else:
-                print(f"[Lefty][Watchdog] Reinstall falló err={kernel32.GetLastError()}")
+                print(f"[Lefty][Watchdog] Reinstall failed err={kernel32.GetLastError()}")
         except Exception as e:
             print(f"[Lefty][Watchdog] reinstall error: {e}")
         return False

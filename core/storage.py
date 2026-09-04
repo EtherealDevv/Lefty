@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
     "start_minimized": False,
     "run_as_admin": True,
     "disable_win_key": False,
-    "invert_clicks": False,  # nuevo: inversión clicks izq/der para zurdos
+    "invert_clicks": False,  # new: left/right click inversion for left-handed
     "latency_mode": "low",  # low / ultra (interception)
     "theme": "dark",
     "accent": "#D0BCFF"

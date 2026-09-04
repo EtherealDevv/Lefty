@@ -1,6 +1,6 @@
 """
 Lefty - Build script para generar .exe con manifest Admin (como Lefty
-Usa pyinstaller --uac-admin para que Windows pida elevación automáticamente
+Use pyinstaller --uac-admin so Windows prompts for elevation automatically
 """
 import subprocess, sys, os, pathlib
 

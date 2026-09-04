@@ -11,7 +11,7 @@ import ctypes
 import os
 import multiprocessing
 
-# Asegurar que el directorio actual esté en path
+# Ensure current directory is in path
 sys.path.insert(0, os.path.dirname(__file__))
 
 def is_admin():
@@ -33,7 +33,7 @@ def try_elevate_if_needed():
 
 def main():
     multiprocessing.freeze_support()
-    # DPI awareness para UI nítida high-res (monochrome profesional)
+    # DPI awareness for sharp high-res UI (professional monochrome)
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except:

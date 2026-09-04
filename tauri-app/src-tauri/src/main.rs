@@ -164,7 +164,7 @@ fn set_hotkey(hotkey: String) -> Result<String, String> {
     };
     // Validar que sea una tecla conocida
     if name_to_vk(&hotkey).is_none() {
-        return Err(format!("Hotkey '{}' no es una tecla válida", hotkey));
+        return Err(format!("Hotkey '{}' is not a valid key", hotkey));
     }
     fs::write(&path, hotkey.trim().to_uppercase()).map_err(|e| e.to_string())?;
     Ok(format!("hotkey set to {}", hotkey))
@@ -343,7 +343,7 @@ fn capture_key() -> Result<String, String> {
             break Ok(v);
         }
         if start.elapsed().as_secs() >= 10 {
-            break Err("timeout - no se presionó tecla".to_string());
+            break Err("timeout - no key was pressed".to_string());
         }
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE};

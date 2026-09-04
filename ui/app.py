@@ -1,6 +1,6 @@
 """
 Lefty - UI Material You Expressive (M3E 2025)
-Evolución expressive: typografía Bold, formas 28dp, colores vibrantes, cápsulas pill, motion playful
+Expressive evolution: Bold typography, 28dp shapes, vibrant colors, pill capsules, playful motion
 Basado en Material You 3 pero con Expressive guidelines (Google I/O 2025)
 """
 import customtkinter as ctk
@@ -21,7 +21,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
 class KeyCaptureDialog(ctk.CTkToplevel):
-    """Diálogo expressive — cápsula grande, tipografía bold, colores terciary"""
+    """Expressive dialog — large capsule, bold typography, tertiary colors"""
     def __init__(self, parent, title="Presiona una tecla", callback=None):
         super().__init__(parent)
         self.callback = callback
@@ -109,7 +109,7 @@ class LeftyApp(ctk.CTk):
             if k not in self.profiles:
                 self.profiles[k] = v
                 _added = True
-        # Fix sycho K/Ñ swap (K debe ser A-izq, Ñ debe ser D-der) — fuerza actualización si está desactualizado
+        # Fix sycho K/Ñ swap (K should be A-left, Ñ should be D-right) — force update if outdated
         if "sycho" in self.profiles and "sycho" in BUILTIN_PROFILES:
             if self.profiles["sycho"].get("mappings") != BUILTIN_PROFILES["sycho"]["mappings"]:
                 self.profiles["sycho"] = BUILTIN_PROFILES["sycho"]
@@ -185,7 +185,7 @@ class LeftyApp(ctk.CTk):
                                         command=self.toggle_engine)
         self.enable_btn.pack(side="left")
 
-        # ===== BODY — más aire, shapes 28 =====
+        # ===== BODY — more aire, shapes 28 =====
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=18, pady=18)
 
@@ -309,7 +309,7 @@ class LeftyApp(ctk.CTk):
         ctk.CTkLabel(engine_card, text="0.02ms • Lefty
                      text_color=M3_EXPRESSIVE["tertiary"]).pack(anchor="w", padx=14, pady=(0, 10))
 
-        # Inversión clicks — zurdos (mouse)
+        # Click inversion — zurdos (mouse)
         invert_card = ctk.CTkFrame(right, fg_color=CTK_THEME["surface_bright"], corner_radius=SHAPES["large"], border_width=1, border_color=CTK_THEME["outline_variant"])
         invert_card.pack(fill="x", padx=12, pady=6)
         ctk.CTkLabel(invert_card, text="Left-handed Mouse", font=ctk.CTkFont(family="Roboto Black", size=12),
@@ -320,7 +320,7 @@ class LeftyApp(ctk.CTk):
         if self.config_data.get("invert_clicks"):
             self.invert_switch.select()
         self.invert_switch.pack(anchor="w", padx=14, pady=(2, 6))
-        ctk.CTkLabel(invert_card, text="Ideal si usas ratón con mano izq • 0ms", font=ctk.CTkFont(size=9, weight="bold"),
+        ctk.CTkLabel(invert_card, text="Ideal if you use left-handed mouse • 0ms", font=ctk.CTkFont(size=9, weight="bold"),
                      text_color=M3_EXPRESSIVE["tertiary"]).pack(anchor="w", padx=14, pady=(0, 10))
 
         # Tips expressive
@@ -610,7 +610,7 @@ class LeftyApp(ctk.CTk):
                 vk_map[VK_MAP["LWIN"]] = VK_MAP["DISABLED"]
                 vk_map[VK_MAP["RWIN"]] = VK_MAP["DISABLED"]
             if not vk_map and self.active_profile != "disabled":
-                messagebox.showwarning("No mappings", "Este perfil no tiene mappings. Añade al menos uno.")
+                messagebox.showwarning("No mappings", "This profile has no mappings. Add at least one.")
                 return
             # Decidir backend: Ultra + Interception disponible → universal (Minecraft)
             use_interception = (self.config_data.get("latency_mode") == "ultra" and is_interception_available() and self.interception is not None)
@@ -619,12 +619,12 @@ class LeftyApp(ctk.CTk):
                 # Mouse invert ya está aplicado vía SwapMouseButton
                 ok = self.interception.start()
                 if not ok:
-                    messagebox.showerror("Error Ultra", "No se pudo iniciar Interception. Driver no instalado o sin admin.\nUsando LL hook (no funcionará en Minecraft).")
+                    messagebox.showerror("Error Ultra", "Could not start Interception. Driver not installed or no admin.\nUsing LL hook (will not work in Minecraft).")
                     # Fallback a LL
                     self.remapper.set_mappings(vk_map)
                     ok = self.remapper.start()
                     if not ok:
-                        messagebox.showerror("Error", "No se pudo instalar el hook. ¿Antivirus bloqueando? Prueba ejecutar como Admin.")
+                        messagebox.showerror("Error", "Could not install hook. Antivirus blocking? Try running as Admin.")
                         return
                     self.using_interception = False
                 else:
@@ -641,7 +641,7 @@ class LeftyApp(ctk.CTk):
             self.remapper.set_mappings(vk_map)
             ok = self.remapper.start()
             if not ok:
-                messagebox.showerror("Error", "No se pudo instalar el hook. ¿Antivirus bloqueando? Prueba ejecutar como Admin.")
+                messagebox.showerror("Error", "Could not install hook. Antivirus blocking? Try running as Admin.")
                 return
             self.using_interception = False
             self.is_enabled = True
@@ -756,7 +756,7 @@ class LeftyApp(ctk.CTk):
                     self.latency_label.configure(text="Latency: <1 ms • SCANCODE")
             except:
                 self.latency_label.configure(text="Latency: --")
-        # Polling más espaciado para NO robar GIL a Minecraft: 1200ms en vez de 800ms
+        # Polling more espaciado para NO robar GIL a Minecraft: 1200ms en vez de 800ms
         self.after(1200, self._start_latency_updates)
 
     def _update_engine_status(self):

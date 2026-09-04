@@ -16,7 +16,7 @@ cd engine_native
 cargo build --release
 ```
 
-Genera `target/release/lefty_engine.exe` (~1.5MB). Lefty lo detecta automáticamente (`engine/remapper.py: _get_rust_exe`).
+Generates `target/release/lefty_engine.exe` (~1.5MB). Lefty lo detecta automáticamente (`engine/remapper.py: _get_rust_exe`).
 
 Si no existe, Lefty usa fallback Python aislado (`engine/engine_process.py`) igualmente sin GIL de UI.
 
@@ -30,7 +30,7 @@ Rust lo vigila cada 200ms (`ReadDirectoryChanges` simplificado a `poll`).
 
 Parent PID: `lefty_engine.exe --parent-pid 1234 --mappings C:\path\engine_mappings.json`
 
-## Por qué Rust vs C#
+## Why Rust vs C#
 
 - `C#` requiere `.NET` GC + JIT, `Rust` 0 GC, `~0.02ms` idéntico a `C++` Lefty
 - Binario `Rust` ` --release` no necesita runtime, igual que `Lefty

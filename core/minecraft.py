@@ -1,8 +1,8 @@
 """
 Lefty - Parcheador de options.txt para Minecraft
-Solución ideal para gaming: 0ms, sin hook, sin frame drops.
+Ideal solution for gaming: 0ms, no hook, no frame drops.
 Lefty
-Este módulo escribe directamente options.txt con los binds zurdos, replica el perfil Lefty.
+This module writes directly to options.txt with left-handed binds, replicating Lefty profile.
 
 Ubicación: %APPDATA%\\.minecraft\\options.txt
 Formato: key_key.forward:key.keyboard.w
@@ -24,7 +24,7 @@ MC_KEY_MAP = {
     0x53: "key.keyboard.s", 0x54: "key.keyboard.t", 0x55: "key.keyboard.u",
     0x56: "key.keyboard.v", 0x57: "key.keyboard.w", 0x58: "key.keyboard.x",
     0x59: "key.keyboard.y", 0x5A: "key.keyboard.z",
-    # Números
+    # Numbers
     0x30: "key.keyboard.0", 0x31: "key.keyboard.1", 0x32: "key.keyboard.2",
     0x33: "key.keyboard.3", 0x34: "key.keyboard.4", 0x35: "key.keyboard.5",
     0x36: "key.keyboard.6", 0x37: "key.keyboard.7", 0x38: "key.keyboard.8",
@@ -39,7 +39,7 @@ MC_KEY_MAP = {
     0x26: "key.keyboard.up", 0x28: "key.keyboard.down", 0x25: "key.keyboard.left", 0x27: "key.keyboard.right",
     0x2D: "key.keyboard.insert", 0x2E: "key.keyboard.delete", 0x24: "key.keyboard.home", 0x23: "key.keyboard.end",
     0x21: "key.keyboard.page.up", 0x22: "key.keyboard.page.down",
-    # Símbolos
+    # Symbols
     0xBA: "key.keyboard.semicolon",  # Ñ en ES
     0xBB: "key.keyboard.equal", 0xBC: "key.keyboard.comma", 0xBD: "key.keyboard.minus",
     0xBE: "key.keyboard.period", 0xBF: "key.keyboard.slash", 0xC0: "key.keyboard.grave.accent",
@@ -135,14 +135,14 @@ def vk_to_mc_key(vk: int) -> str | None:
 
 def patch_minecraft_for_profile(profile: dict, dry_run=False) -> dict:
     """
-    Parchea options.txt según perfil Lefty.
+    Patch options.txt per Lefty profile.
     profile: {"mappings": [["O","W"], ["K","A"]...]}
     Retorna {"patched": int, "path": Path, "changes": [(control, old, new)]}
     """
     from core.keys import VK_MAP
     p = get_minecraft_options_path()
     if not p.exists():
-        return {"error": f"No se encontró {p}. Abre Minecraft al menos una vez."}
+        return {"error": f"Not found {p}. Open Minecraft at least once."}
     # Leer
     try:
         with open(p, "r", encoding="utf-8") as f:
@@ -164,7 +164,7 @@ def patch_minecraft_for_profile(profile: dict, dry_run=False) -> dict:
             if sv not in src_to_dst:
                 src_to_dst[sv] = dv
 
-    # También expandir via app_specific? No
+    # Also expand via app_specific? No
 
     changes = []
     new_lines = []
@@ -175,14 +175,14 @@ def patch_minecraft_for_profile(profile: dict, dry_run=False) -> dict:
             continue
         key, val = line.strip().split(":", 1)
         if key in MC_CONTROL_MAP.values() or key.startswith("key_key."):
-            # Ver si este control corresponde a algún dst en dst_to_src
+            # Check if this control corresponds to any dst in dst_to_src
             # Buscar vk_dst cuyo MC_CONTROL_MAP == key
             target_vk = None
             for vk_dst, mc_key in MC_CONTROL_MAP.items():
                 if mc_key == key:
                     target_vk = vk_dst
                     break
-            # También buscar por hotbar.1-9 genérico
+            # Also search for hotbar.1-9 generic
             if key.startswith("key_key.hotbar."):
                 try:
                     num = int(key.split(".")[-1])
@@ -228,7 +228,7 @@ def restore_minecraft_backup() -> dict:
     p = get_minecraft_options_path()
     bak = p.with_suffix(".txt.lefty_bak")
     if not bak.exists():
-        # buscar último backup timestamp
+        # search last backup timestamp
         candidates = list(p.parent.glob("options.txt.lefty_bak_*"))
         if not candidates:
             return {"error": "No hay backup"}

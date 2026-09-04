@@ -1,6 +1,6 @@
 """
 Lefty - Componentes Material You Expressive
-M3 Expressive 2025: formas más redondeadas, tipografía bold, colores vibrantes, movimiento
+M3 Expressive 2025: formas more redondeadas, tipografía bold, colores vibrantes, movimiento
 """
 import customtkinter as ctk
 from .theme import CTK_THEME, SHAPES, M3_EXPRESSIVE
@@ -51,7 +51,7 @@ class M3FilledButton(ctk.CTkButton):
                          hover_color=CTK_THEME["primary_hover"],
                          text_color=CTK_THEME["on_primary"],
                          corner_radius=SHAPES["fab"],  # pill expressive
-                         height=40,  # más grande (era 36)
+                         height=40,  # larger (was 36)
                          font=ctk.CTkFont(family="Roboto Medium", size=14, weight="bold"),
                          **kwargs)
         self._add_hover_scale()
@@ -73,7 +73,7 @@ class M3ExpressiveFAB(ctk.CTkButton):
                          hover_color=CTK_THEME["primary_hover"],
                          text_color=CTK_THEME["on_primary"],
                          corner_radius=SHAPES["fab"],
-                         height=48,  # expressive FAB más alto
+                         height=48,  # expressive FAB taller
                          width=170,
                          font=ctk.CTkFont(family="Roboto", size=14, weight="bold"),
                          border_width=0,
@@ -96,7 +96,7 @@ class M3OutlinedButton(ctk.CTkButton):
                          fg_color="transparent",
                          hover_color=CTK_THEME["surface_high"],
                          text_color=CTK_THEME["primary"],
-                         border_width=1.5,  # más grueso expressive
+                         border_width=1.5,  # thicker expressive
                          border_color=CTK_THEME["outline"],
                          corner_radius=SHAPES["fab"],
                          height=40,
@@ -104,7 +104,7 @@ class M3OutlinedButton(ctk.CTkButton):
                          **kwargs)
 
 class M3TertiaryButton(ctk.CTkButton):
-    """Nuevo: botón tertiary vibrante (M3 Expressive usa terciario para acciones lúdicas)"""
+    """New: vibrant tertiary button (M3 Expressive uses tertiary for playful actions)"""
     def __init__(self, parent, **kwargs):
         super().__init__(parent,
                          fg_color=CTK_THEME["tertiary_container"] if "tertiary_container" in CTK_THEME else M3_EXPRESSIVE["tertiary_container"],
@@ -116,7 +116,7 @@ class M3TertiaryButton(ctk.CTkButton):
                          **kwargs)
 
 # ------------------------------------------------------------------
-# Chips — Pill expressive con bordes más juguetones
+# Chips — Pill expressive with more playful borders
 # ------------------------------------------------------------------
 class M3Chip(ctk.CTkFrame):
     def __init__(self, parent, text, selected=False, command=None, **kwargs):
@@ -156,7 +156,7 @@ class M3ExpressiveChip(ctk.CTkFrame):
         self.label.pack(padx=16, pady=8)
 
 # ------------------------------------------------------------------
-# Switch Row — Expressive con tipografía más grande
+# Switch Row — Expressive with larger typography
 # ------------------------------------------------------------------
 class M3SwitchRow(ctk.CTkFrame):
     def __init__(self, parent, title, subtitle, initial=False, command=None, **kwargs):
@@ -181,7 +181,7 @@ class M3SwitchRow(ctk.CTkFrame):
         return self.switch.get() == 1
 
 # ------------------------------------------------------------------
-# Mapping Row — Expressive: más alto, chips más grandes, flecha terciaria
+# Mapping Row — Expressive: taller, larger chips, tertiary arrow
 # ------------------------------------------------------------------
 class MappingRow(ctk.CTkFrame):
     """Fila de mapeo expressive — 60dp alto, chips 36dp, flecha terciaria vibrante"""
@@ -193,13 +193,13 @@ class MappingRow(ctk.CTkFrame):
                          **kwargs)
         self.src = src
         self.dst = dst
-        # Src chip — surface_highest, pill más grande
+        # Src chip — surface_highest, larger pill
         src_frame = ctk.CTkFrame(self, fg_color=CTK_THEME["surface_highest"], corner_radius=SHAPES["pill"], width=104, height=36)
         src_frame.pack(side="left", padx=(14, 8), pady=12)
         src_frame.pack_propagate(False)
         ctk.CTkLabel(src_frame, text=src, font=ctk.CTkFont(family="Roboto", size=13, weight="bold"),
                      text_color=CTK_THEME["on_surface"]).pack(expand=True)
-        # Arrow — terciary expressive más vibrante
+        # Arrow — tertiary expressive more vibrant
         arrow_color = M3_EXPRESSIVE["tertiary"] if "tertiary" in CTK_THEME else CTK_THEME["primary"]
         ctk.CTkLabel(self, text="→", font=ctk.CTkFont(size=20, weight="bold"),
                      text_color=arrow_color).pack(side="left", padx=8)
@@ -220,7 +220,7 @@ class MappingRow(ctk.CTkFrame):
             del_btn.pack(side="right", padx=8)
 
 class MappingRowExpressive(ctk.CTkFrame):
-    """Variante aún más expressive con badge de swap y hover scale"""
+    """Variante aún more expressive con badge de swap y hover scale"""
     def __init__(self, parent, src, dst, on_delete=None, on_swap=None, accent=None, **kwargs):
         super().__init__(parent,
                          fg_color=CTK_THEME["surface_high"],

@@ -1,7 +1,7 @@
 """
 Lefty - Material You Monochrome (Google M3 Monochrome 2025)
 Paleta neutra profesional, agradable, organizada. Basado en Material You Monochrome.
-Tonal greys con chroma 4, sin saturación, elegante para gaming pro.
+Tonal greys with chroma 4, no saturation, elegant for pro gaming.
 """
 # Monochrome Dark - neutral 6..90, pleasant warm grey
 M3_MONOCHROME = {
@@ -92,7 +92,7 @@ CTK_THEME = {
     "warning_container": M3_MONOCHROME["warning_container"],
 }
 
-# Alias para compatibilidad con código viejo que usa M3_EXPRESSIVE
+# Alias for compatibility with old code using M3_EXPRESSIVE
 M3_EXPRESSIVE = M3_MONOCHROME
 
 # Shapes — profesional, sutil, organizado (no playful 28dp)
@@ -122,7 +122,7 @@ FONTS = {
     "label_small": ("Segoe UI", 10),
 }
 
-# Tipografía profesional — Segoe UI (Windows nativo) sobria
+# Professional typography — Segoe UI (native Windows) sober
 FONTS_EXPRESSIVE = {
     "display_large": ("Segoe UI Semibold", 26),
     "display_small": ("Segoe UI Semibold", 20),
