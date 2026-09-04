@@ -93,7 +93,7 @@ export default function App() {
 
   useEffect(() => {
     try { localStorage.setItem("lefty_launch_active", String(launchActive)); } catch {}
-    // Do not call set_engine_enabled here — manual toggle uses enabled, launchActive only for startup
+    invoke("set_engine_enabled", {enabled: launchActive}).catch(()=>{});
   }, [launchActive]);
 
   useEffect(() => {
@@ -150,17 +150,8 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      let shouldEnable = true;
-      try { const v = localStorage.getItem("lefty_launch_active"); if (v !== null) shouldEnable = v === "true"; } catch {}
-      invoke("set_engine_enabled", {enabled: shouldEnable}).catch(()=>{});
-      if (shouldEnable) {
-        invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
-        setEnabled(true);
-      } else {
-        invoke("update_mappings", {mappings: profiles[active].mappings}).catch(()=>{});
-        setEnabled(false);
-        invoke("stop_engine").catch(()=>{});
-      }
+      invoke("set_engine_enabled", {enabled: true}).catch(()=>{});
+      invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
     }, 400);
     const id = setInterval(async () => {
       try {
