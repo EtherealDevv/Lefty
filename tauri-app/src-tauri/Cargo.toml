@@ -1,6 +1,6 @@
 [package]
 name = "lefty-tauri"
-version = "1.1.0"
+version = "1.2.1"
 description = "Lefty Tauri - Rust + React + Tailwind Monochrome"
 authors = ["Lefty"]
 edition = "2021"
