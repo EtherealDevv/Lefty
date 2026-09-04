@@ -119,15 +119,12 @@ export default function App() {
   const prof = profiles[active];
   const toggle = async () => {
     const next = !enabled;
-    setEnabled(next);
+    setEnabled(next); // optimistic — instant feedback
     try {
-      await invoke("set_engine_enabled", {enabled: next}).catch(()=>{});
-      if (next) {
-        await invoke("update_mappings", { mappings: prof.mappings });
-        await invoke("start_engine", { profile: active });
-      } else {
-        await invoke("stop_engine");
-      }
+      await invoke("set_engine_enabled", {enabled: next});
+      // Keep engine alive so F6 toggles instantly without respawn
+      await invoke("update_mappings", { mappings: prof.mappings });
+      await invoke("start_engine", { profile: active });
     } catch {
       setEnabled(!next);
     }
@@ -142,21 +139,31 @@ export default function App() {
   }, [active]);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      let shouldEnable = false;
-      try { const v = localStorage.getItem("lefty_launch_active"); if (v !== null) shouldEnable = v === "true"; } catch {}
-      invoke("set_engine_enabled", {enabled: shouldEnable}).catch(()=>{});
-      setEnabled(shouldEnable);
-      invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
-    }, 400);
+    // Immediate startup — no delay: respect persisted F6 state and don't force disabled
+    let startActive = active;
+    let startMappings: Mapping[] = profiles[active]?.mappings || [];
+    try {
+      const saved = localStorage.getItem("lefty_profiles");
+      const savedActive = localStorage.getItem("lefty_active");
+      if (savedActive) startActive = savedActive;
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, Profile>;
+        if (parsed[startActive]?.mappings) startMappings = parsed[startActive].mappings;
+        else if (parsed[active]?.mappings) { startActive = active; startMappings = parsed[active].mappings; }
+      }
+    } catch {}
+    // Sync visual state with actual file (don't force false)
+    invoke<boolean>("get_engine_enabled").then(v=> setEnabled(v)).catch(()=>{});
+    // Immediate engine: write mappings and start without 400ms wait
+    invoke("update_mappings", {mappings: startMappings}).then(()=> invoke("start_engine", {profile: startActive}).catch(()=>{})).catch(()=>{});
     const id = setInterval(async () => {
       try {
         const state = await invoke<boolean>("get_engine_enabled");
         setEnabled(prev => prev !== state ? state : prev);
       } catch {}
-    }, 100);
-    return () => { clearTimeout(t); clearInterval(id); };
-  }, [profiles, active]);
+    }, 45);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     return () => {

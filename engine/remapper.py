@@ -573,7 +573,7 @@ class LeftyRemapperProxy:
                         close_fds=False
                     )
                     self._is_rust = True
-                    time.sleep(0.35)
+                    time.sleep(0.12)
                     if self._proc.poll() is None:
                         print(f"[Lefty Proxy] Engine Rust native PID={self._proc.pid} (native)")
                         self._running_proxy = True
@@ -662,7 +662,7 @@ class LeftyRemapperProxy:
             ok = self._spawn(vk_map)
             if ok:
                 self._running_proxy = True
-                time.sleep(0.35)
+                time.sleep(0.08)
                 return self.is_running()
         print("[Lefty Proxy] Usando engine in-process (fallback)", flush=True)
         self._use_isolated = False

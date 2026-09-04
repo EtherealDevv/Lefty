@@ -67,15 +67,19 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         return CallNextHookEx(G_HOOK_COPY, n, w, l);
     }
 
-    // Custom hotkey (default F6) — native low-level, no file I/O in hot path except via HOTKEY_VK
+    // Custom hotkey (default F6) — native low-level, instant toggle without blocking I/O
     let hotkey = HOTKEY_VK.load(Ordering::SeqCst);
     if vk_raw == hotkey && (w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize) {
         let new_val = !ENABLED.load(Ordering::SeqCst);
         ENABLED.store(new_val, Ordering::SeqCst);
+        // Async write to avoid blocking the hook (prevents perceived delay on first F6)
         if let Ok(appdata) = env::var("APPDATA") {
             let p = PathBuf::from(appdata).join("Lefty").join("f6_toggle.txt");
-            let _ = fs::create_dir_all(p.parent().unwrap());
-            let _ = fs::write(&p, if new_val { b"1" } else { b"0" });
+            let val = new_val;
+            std::thread::spawn(move || {
+                let _ = fs::create_dir_all(p.parent().unwrap());
+                let _ = fs::write(&p, if val { b"1" } else { b"0" });
+            });
         }
         return LRESULT(1);
     }
@@ -160,7 +164,7 @@ fn main() {
     std::thread::spawn(move ||{
         let mut last = fs::read_to_string(&f6_path2).unwrap_or("0".to_string());
         loop{
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::sleep(Duration::from_millis(35));
             if let Ok(s) = fs::read_to_string(&f6_path2) {
                 if s.trim() != last.trim() {
                     last = s.clone();
@@ -193,7 +197,7 @@ fn main() {
     std::thread::spawn(move ||{
         let mut last=fs::metadata(&mp2).and_then(|m| m.modified()).ok();
         loop{
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::sleep(Duration::from_millis(40));
             if let Ok(md)=fs::metadata(&mp2){
                 if let Ok(mt)=md.modified(){
                     if Some(mt)!=last{
@@ -245,7 +249,7 @@ fn main() {
     std::thread::spawn(move ||{
         let mut last_hotkey = fs::read_to_string(&hotkey_path2).unwrap_or("F6".to_string());
         loop{
-            std::thread::sleep(Duration::from_millis(500));
+            std::thread::sleep(Duration::from_millis(80));
             if let Ok(s) = fs::read_to_string(&hotkey_path2) {
                 let n = s.trim().to_uppercase();
                 if n != last_hotkey.trim().to_uppercase() {
