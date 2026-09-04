@@ -214,14 +214,14 @@ export default function App() {
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-2.5 pl-3 pr-1 py-1 rounded-full bg-surface-container-high border border-outline-variant">
-            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-tertiary" : "bg-outline"}`} />
+            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-error" : "bg-outline"}`} />
             <span className="text-[11px] font-medium tracking-wide text-on-surface pr-2">{enabled ? "ACTIVE" : "INACTIVE"}</span>
             <button onClick={toggle} className={`h-7 px-4 rounded-full text-[12px] font-medium ${enabled ? "bg-surface-container-highest border border-outline text-on-surface" : "bg-primary text-on-primary"}`}>
               {enabled ? "Pause" : "Activate"}
             </button>
           </div>
           <div className="sm:hidden flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-tertiary" : "bg-outline"}`} />
+            <div className={`w-2 h-2 rounded-full ${enabled ? "bg-error" : "bg-outline"}`} />
             <button onClick={toggle} className={`h-8 px-4 rounded-full text-[12px] font-medium ${enabled ? "bg-surface-container-high border border-outline text-on-surface" : "bg-primary text-on-primary"}`}>{enabled ? "Pause" : "Activate"}</button>
           </div>
           <button onClick={()=> setShowSettings(true)} aria-label="Settings" className="w-9 h-9 rounded-full bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest grid place-items-center text-on-surface-variant hover:text-on-surface">
