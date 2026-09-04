@@ -33,7 +33,7 @@ const BUILTIN: Record<string, Profile> = {
 export default function App() {
   const [active, setActive] = useState("sycho");
   const [profiles, setProfiles] = useState<Record<string, Profile>>(BUILTIN);
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [invertMouse, setInvertMouse] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -45,6 +45,9 @@ export default function App() {
   const [hideToTray, setHideToTray] = useState(true);
   const [hotkey, setHotkey] = useState("F6");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [launchActive, setLaunchActive] = useState(() => {
+    try { const v = localStorage.getItem("lefty_launch_active"); return v === null ? true : v === "true"; } catch { return true; }
+  });
 
   useEffect(() => {
     invoke<[number, string][]>("get_key_name_list").then(list => {
@@ -88,7 +91,10 @@ export default function App() {
     } catch {}
   }, [active, invertMouse]);
 
-
+  useEffect(() => {
+    try { localStorage.setItem("lefty_launch_active", String(launchActive)); } catch {}
+    invoke("set_engine_enabled", {enabled: launchActive}).catch(()=>{});
+  }, [launchActive]);
 
   useEffect(() => {
     if (!capturing) return;
@@ -128,6 +134,8 @@ export default function App() {
         await invoke("stop_engine");
       }
       setEnabled(next);
+      setLaunchActive(next);
+      try { localStorage.setItem("lefty_launch_active", String(next)); } catch {}
     } catch {
       setEnabled(!enabled);
     }
@@ -143,12 +151,23 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      invoke("set_engine_enabled", {enabled: false}).catch(()=>{});
-      setEnabled(false);
-      invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
+      let shouldEnable = true;
+      try { const v = localStorage.getItem("lefty_launch_active"); if (v !== null) shouldEnable = v === "true"; } catch {}
+      if (shouldEnable) {
+        invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
+        setEnabled(true);
+      } else {
+        setEnabled(false);
+      }
     }, 400);
-    return () => clearTimeout(t);
-  }, []);
+    const id = setInterval(async () => {
+      try {
+        const state = await invoke<boolean>("get_engine_enabled");
+        setEnabled(prev => prev !== state ? state : prev);
+      } catch {}
+    }, 300);
+    return () => { clearTimeout(t); clearInterval(id); };
+  }, [profiles, active]);
 
   useEffect(() => {
     return () => {
@@ -366,6 +385,17 @@ export default function App() {
               </div>
               <div className="space-y-3">
                 <h4 className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>GENERAL</h4>
+                <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                  <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Activity size={16}/></span>
+                  <div className="flex-1">
+                    <div className="text-[13px] font-medium text-on-surface">Launch with remaps active</div>
+                    <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">When enabled, Lefty opens with your keymaps active. When disabled, it starts paused — press Activate or {hotkey} to enable.</div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={launchActive} onChange={e=>{ const v=e.target.checked; setLaunchActive(v); }} className="sr-only peer" />
+                    <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
+                  </label>
+                </div>
                 <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
                   <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Power size={16}/></span>
                   <div className="flex-1">
