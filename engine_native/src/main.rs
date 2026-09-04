@@ -28,7 +28,7 @@ static G_STATE: OnceLock<Arc<Mutex<State>>> = OnceLock::new();
 static mut G_HOOK: HHOOK = HHOOK(std::ptr::null_mut());
 static mut G_HOOK_COPY: HHOOK = HHOOK(std::ptr::null_mut());
 static RUNNING: AtomicBool = AtomicBool::new(true);
-static ENABLED: AtomicBool = AtomicBool::new(true);
+static ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEY_VK: AtomicU32 = AtomicU32::new(0x75);
 
 fn get_state() -> Arc<Mutex<State>> {
@@ -149,6 +149,27 @@ fn parent_pid_from_args() -> Option<u32> {
 fn main() {
     // Init state
     let _ = get_state();
+    // Init ENABLED from f6_toggle.txt (default paused)
+    let f6_path = if let Ok(a) = env::var("APPDATA") { PathBuf::from(a).join("Lefty").join("f6_toggle.txt") } else { PathBuf::from("f6_toggle.txt") };
+    if let Ok(s) = fs::read_to_string(&f6_path) {
+        ENABLED.store(s.trim() == "1", Ordering::SeqCst);
+    } else {
+        ENABLED.store(false, Ordering::SeqCst);
+    }
+    let f6_path2 = f6_path.clone();
+    std::thread::spawn(move ||{
+        let mut last = fs::read_to_string(&f6_path2).unwrap_or("0".to_string());
+        loop{
+            std::thread::sleep(Duration::from_millis(300));
+            if let Ok(s) = fs::read_to_string(&f6_path2) {
+                if s.trim() != last.trim() {
+                    last = s.clone();
+                    ENABLED.store(s.trim() == "1", Ordering::SeqCst);
+                }
+            }
+            if !RUNNING.load(Ordering::SeqCst){ break; }
+        }
+    });
     let mp = mappings_path();
     if mp.exists() {
         if let Some(m) = load(&mp) {
