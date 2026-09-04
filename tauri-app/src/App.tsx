@@ -301,34 +301,51 @@ export default function App() {
       </div>
       {showAdd && (
         <div className="fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4" onClick={()=>setShowAdd(false)}>
-          <div className="w-full max-w-[440px] bg-surface-container rounded-[28px] border border-outline-variant p-5 shadow-m3-3" onClick={e=>e.stopPropagation()}>
-            <h3 className="text-[14px] font-display font-semibold text-on-surface">Add mapping</h3>
-            <p className="text-[11px] text-on-surface-variant mt-1">Choose source and target</p>
-            {capturing && <p className="mt-3 text-[11px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-1.5 text-center">Capturing… press a key ({capturing})</p>}
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div>
-                <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
-                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
-                </select>
-                <button onClick={()=>setCapturing("src")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture source</button>
+          <div className="w-full max-w-[480px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 overflow-hidden flex flex-col max-h-[92vh]" onClick={e=>e.stopPropagation()}>
+            <div className="px-6 py-5 border-b border-outline-variant bg-surface-container-high flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center shadow-m3-1"><Plus size={18}/></span>
+                <div>
+                  <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Add mapping</h3>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Didáctico • Elige origen → destino • Monochrome</p>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET</label>
-                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-1 w-full h-9 rounded-xl bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
-                </select>
-                <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture target</button>
+              <button onClick={()=>setShowAdd(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant grid place-items-center text-on-surface-variant">✕</button>
+            </div>
+            <div className="flex-1 overflow-auto p-5 space-y-4 bg-surface-container">
+              <div className="rounded-xl bg-primary-container/20 border border-outline-variant p-3 flex gap-2.5">
+                <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center flex-shrink-0"><Lightbulb size={14}/></span>
+                <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">Tip:</span> Usa <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">Capture</span> y presiona la tecla física, o elige del desplegable. Ej: <span className="font-mono bg-surface-container-highest border px-1 py-0.5 rounded-full">W → I</span> para zurdos.</p>
               </div>
+              {capturing && <p className="text-[12px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-4 py-2.5 text-center animate-pulse">Capturando… presiona una tecla ({capturing === "src" ? "origen" : "destino"})</p>}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-primary"/>ORIGEN</label>
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">Tecla que presionas. Se detecta con <span className="font-mono bg-surface-container-highest border px-1 py-0.5 rounded-full">ToUnicodeEx</span>.</p>
+                  <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="w-full h-11 rounded-xl bg-surface-container-high border border-outline-variant text-[13px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+                    {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <button onClick={()=>setCapturing("src")} className={`w-full h-9 rounded-full text-[12px] font-medium border flex items-center justify-center gap-1.5 ${capturing==="src" ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant text-on-surface hover:bg-surface-container-highest"}`}><Keyboard size={14}/>{capturing==="src" ? "Presiona tecla…" : "Capture origen"}</button>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-display font-medium tracking-widest text-on-surface flex items-center gap-2"><span className="w-1 h-3 rounded-full bg-tertiary"/>DESTINO</label>
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">Tecla que se envía. Usa <span className="font-mono bg-surface-container-highest border px-1 py-0.5 rounded-full">SendInput</span>.</p>
+                  <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="w-full h-11 rounded-xl bg-surface-container-high border border-outline-variant text-[13px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+                    {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <button onClick={()=>setCapturing("dst")} className={`w-full h-9 rounded-full text-[12px] font-medium border flex items-center justify-center gap-1.5 ${capturing==="dst" ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant text-on-surface hover:bg-surface-container-highest"}`}><Keyboard size={14}/>{capturing==="dst" ? "Presiona tecla…" : "Capture destino"}</button>
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-3 p-4 rounded-[16px] bg-surface-container-high border border-outline-variant">
+                <span className="px-4 py-2 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono text-on-surface min-w-[80px] text-center shadow-sm">{srcKey}</span>
+                <span className="w-9 h-9 rounded-full bg-primary text-on-primary grid place-items-center shadow-m3-1"><ArrowLeftRight size={14}/></span>
+                <span className="px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono border border-outline-variant min-w-[80px] text-center shadow-sm">{dstKey}</span>
+              </div>
+              <p className="text-[11px] text-center font-mono text-on-surface-variant">Se guarda en <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">engine_mappings.json</span> y activa con <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">{hotkey}</span></p>
             </div>
-            <div className="flex items-center justify-center gap-2 mt-5">
-              <span className="px-3.5 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[11px] font-mono text-on-surface">{srcKey}</span>
-              <span className="w-6 h-6 rounded-full bg-primary text-on-primary grid place-items-center text-[10px]">→</span>
-              <span className="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[11px] font-mono border border-outline-variant">{dstKey}</span>
-            </div>
-            <div className="flex gap-2.5 mt-6">
-              <button onClick={()=>setShowAdd(false)} className="flex-1 h-9 rounded-full border border-outline-variant text-on-surface text-[12px] font-medium">Cancel</button>
-              <button onClick={addMap} className="flex-1 h-9 rounded-full bg-primary text-on-primary text-[12px] font-medium">Save mapping</button>
+            <div className="p-4 border-t border-outline-variant bg-surface-container-high flex gap-3">
+              <button onClick={()=>setShowAdd(false)} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[13px] font-medium">Cancelar</button>
+              <button onClick={addMap} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2">Guardar</button>
             </div>
           </div>
         </div>
