@@ -180,30 +180,61 @@ fn get_hotkey() -> Result<String, String> {
     Ok(fs::read_to_string(&path).unwrap_or_else(|_| "F6".to_string()).trim().to_uppercase())
 }
 
-#[tauri::command]
-fn set_autostart(enabled: bool) -> Result<String, String> {
-    // Windows Run key (auto-start) — always use Lefty.exe for correct Task Manager name
+fn get_task_name() -> Result<String, String> {
+    let user = std::env::var("USERNAME").map_err(|e| e.to_string())?;
+    Ok(format!("\\Lefty\\Autorun for {}", user))
+}
+fn get_exe_for_autostart() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe = if exe.file_name().map(|n| n.to_string_lossy().to_lowercase() != "lefty.exe").unwrap_or(true) {
         if let Some(base) = exe.parent() {
             let cand = base.join("Lefty.exe");
             if cand.exists() { cand } else {
-                // Also check Program Files Lefty
                 let prog = PathBuf::from("C:\\Program Files\\Lefty\\Lefty.exe");
                 if prog.exists() { prog } else { exe }
             }
         } else { exe }
     } else { exe };
+    Ok(exe)
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<String, String> {
+    // PowerToys-style Task Scheduler autostart — robust, shows as Lefty in Task Manager Startup
+    let task_name = get_task_name()?;
+    let exe = get_exe_for_autostart()?;
     let exe_str = exe.to_string_lossy().to_string();
+    // Clean legacy registry entries that showed Lefty_fix
     let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    // Clean old wrong entries (Lefty_fix, lefty-tauri) that caused Task Manager to show Lefty_fix
     let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty_fix", "/f"]).output();
     let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "lefty-tauri", "/f"]).output();
     let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty-tauri", "/f"]).output();
+    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/f"]).output();
     let status = if enabled {
-        std::process::Command::new("reg").args(["add", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe_str), "/f"]).output().map_err(|e| e.to_string())?
+        // PowerToys uses \PowerToys\Autorun for %USERNAME% with ONLOGON trigger, delay 3s, interactive token
+        // We do same for \Lefty\Autorun for %USERNAME%
+        let username = std::env::var("USERNAME").map_err(|e| e.to_string())?;
+        let userdomain = std::env::var("USERDOMAIN").unwrap_or_else(|_| ".".to_string());
+        let full_user = format!("{}\\{}", userdomain, username);
+        // Use schtasks to create task — PowerToys uses COM Task Scheduler, schtasks is equivalent and simpler
+        std::process::Command::new("schtasks")
+            .args([
+                "/Create",
+                "/TN", &task_name,
+                "/TR", &format!("\"{}\"", exe_str),
+                "/SC", "ONLOGON",
+                "/RU", &full_user,
+                "/RL", "HIGHEST",
+                "/DELAY", "0000:03",
+                "/F",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?
     } else {
-        std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/f"]).output().map_err(|e| e.to_string())?
+        std::process::Command::new("schtasks")
+            .args(["/Delete", "/TN", &task_name, "/F"])
+            .output()
+            .map_err(|e| e.to_string())?
     };
     if !status.status.success() {
         return Err(format!("reg failed: {:?}", status));
@@ -213,8 +244,27 @@ fn set_autostart(enabled: bool) -> Result<String, String> {
 
 #[tauri::command]
 fn get_autostart() -> Result<bool, String> {
-    let out = std::process::Command::new("reg").args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", "Lefty"]).output().map_err(|e| e.to_string())?;
-    Ok(out.status.success())
+    // PowerToys-style: check Task Scheduler task existence and enabled
+    let task_name = get_task_name()?;
+    let out = std::process::Command::new("schtasks")
+        .args(["/Query", "/TN", &task_name])
+        .output()
+        .map_err(|e| e.to_string())?;
+    // schtasks returns 0 if task exists, even if disabled; we check output for "Ready" or "Running" vs "Disabled"
+    // Simpler: if query succeeds, check if task is not disabled via /Query /V /FO CSV
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let out_v = std::process::Command::new("schtasks")
+        .args(["/Query", "/TN", &task_name, "/V", "/FO", "CSV"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&out_v.stdout);
+    // If task exists but is disabled, it will contain "Disabled"
+    if stdout.to_lowercase().contains("disabled") {
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 #[tauri::command]
