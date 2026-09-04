@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import laskIcon from "./LASK.png";
@@ -6,28 +6,28 @@ import laskIcon from "./LASK.png";
 type Mapping = [string, string];
 type Profile = { display_name: string; description: string; icon: string; mappings: Mapping[] };
 
-const FALLBACK_ALL_KEYS = ["'","Â´","Â¨","Ã‡","Ã§","+","*","Â°","|","Â¬","<",">",";","Ã‘",":",",","-","_",".","/","?","=","Â¡","Â¿","0","1","2","3","4","5","6","7","8","9", "A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","[","{","\\","]","}", "`","ALT","BACKSPACE","CAPSLOCK","CTRL","DELETE","DISABLED","DOWN","END","ENTER","ESC","F1","F10","F11","F12","F2","F3","F4","F5","F6","F7","F8","F9","HOME","INSERT","LALT","LCTRL","LEFT","LSHIFT","LWIN","NUM*","NUM+","NUM-","NUM.","NUM/","NUM0","NUM1","NUM2","NUM3","NUM4","NUM5","NUM6","NUM7","NUM8","NUM9","NUMLOCK","PAGEDOWN","PAGEUP","RALT","RCTRL","RIGHT","RSHIFT","RWIN","SCROLLLOCK","SHIFT","SPACE","TAB","UP"];
+const FALLBACK_ALL_KEYS = ["'","´","¨","Ç","ç","+","*","°","|","¬","<",">",";","Ñ",":",",","-","_",".","/","?","=","¡","¿","0","1","2","3","4","5","6","7","8","9", "A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","[","{","\\","]","}", "`","ALT","BACKSPACE","CAPSLOCK","CTRL","DELETE","DISABLED","DOWN","END","ENTER","ESC","F1","F10","F11","F12","F2","F3","F4","F5","F6","F7","F8","F9","HOME","INSERT","LALT","LCTRL","LEFT","LSHIFT","LWIN","NUM*","NUM+","NUM-","NUM.","NUM/","NUM0","NUM1","NUM2","NUM3","NUM4","NUM5","NUM6","NUM7","NUM8","NUM9","NUMLOCK","PAGEDOWN","PAGEUP","RALT","RCTRL","RIGHT","RSHIFT","RWIN","SCROLLLOCK","SHIFT","SPACE","TAB","UP"];
 
 const BUILTIN: Record<string, Profile> = {
   sycho: {
-    display_name: "Sycho â€” OÃ‘LK",
-    description: "WASD â†’ IJKL Â· O=W forward, K=A left, L=S back, Ã‘=D right. Mirrored right side.",
-    icon: "â—†",
-    mappings: [["O","W"],["K","A"],["L","S"],["Ã‘","D"],["I","E"],["P","Q"],["U","R"],["Y","T"],["J","F"],["H","G"],["M","C"],["N","V"],[",","X"],[".","Z"],["RSHIFT","LSHIFT"],["RCTRL","LCTRL"],["RALT","LALT"]],
+    display_name: "Sycho — OÑLK",
+    description: "WASD → IJKL · O=W forward, K=A left, L=S back, Ñ=D right. Mirrored right side.",
+    icon: "◆",
+    mappings: [["O","W"],["K","A"],["L","S"],["Ñ","D"],["I","E"],["P","Q"],["U","R"],["Y","T"],["J","F"],["H","G"],["M","C"],["N","V"],[",","X"],[".","Z"],["RSHIFT","LSHIFT"],["RCTRL","LCTRL"],["RALT","LALT"]],
   },
   zurdo_ijkl: {
     display_name: "Left-handed IJKL",
-    description: "WASD â†’ IJKL Â· I=forward, J=left, K=back, L=right",
-    icon: "â—‡",
+    description: "WASD → IJKL · I=forward, J=left, K=back, L=right",
+    icon: "◇",
     mappings: [["W","I"],["A","J"],["S","K"],["D","L"],["Q","U"],["E","O"],["R","P"],["F","M"],["C","N"]],
   },
   zurdo_flechas: {
     display_name: "Arrow Keys",
-    description: "WASD â†’ Arrow Keys â€” Classic",
-    icon: "â†’",
+    description: "WASD → Arrow Keys — Classic",
+    icon: "→",
     mappings: [["W","UP"],["A","LEFT"],["S","DOWN"],["D","RIGHT"]],
   },
-  custom: { display_name: "Custom", description: "Build your own layout", icon: "âœ¦", mappings: [] },
+  custom: { display_name: "Custom", description: "Build your own layout", icon: "✦", mappings: [] },
 };
 
 export default function App() {
@@ -50,9 +50,9 @@ export default function App() {
     invoke<[number, string][]>("get_key_name_list").then(list => {
       if (Array.isArray(list) && list.length > 10) {
         const names = list.map(([, name]) => name).filter(n => n && n !== "Undefined");
-        if (!names.includes("Ã‘") && FALLBACK_ALL_KEYS.includes("Ã‘")) names.push("Ã‘");
+        if (!names.includes("Ñ") && FALLBACK_ALL_KEYS.includes("Ñ")) names.push("Ñ");
         if (!names.includes("'") && FALLBACK_ALL_KEYS.includes("'")) names.push("'");
-        if (!names.includes("Â´") && FALLBACK_ALL_KEYS.includes("Â´")) names.push("Â´");
+        if (!names.includes("´") && FALLBACK_ALL_KEYS.includes("´")) names.push("´");
         if (!names.includes("`") && FALLBACK_ALL_KEYS.includes("`")) names.push("`");
         setAllKeys(names);
       }
@@ -209,7 +209,7 @@ export default function App() {
               <h1 className="text-[17px] font-display font-semibold tracking-tight text-on-surface">Lefty</h1>
               <span className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">v2</span>
             </div>
-            <p className="text-[11px] font-medium tracking-wide text-on-surface-variant mt-[2px]">By Sycho <span className="text-outline">Â·</span> Left-handed â€¢ Monochrome</p>
+            <p className="text-[11px] font-medium tracking-wide text-on-surface-variant mt-[2px]">By Sycho <span className="text-outline">·</span> Left-handed • Monochrome</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -242,7 +242,7 @@ export default function App() {
                 <span className={`w-8 h-8 grid place-items-center rounded-lg text-[13px] font-medium flex-shrink-0 ${active===key ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}>{p.icon}</span>
                 <div className="flex-1 min-w-0">
                   <div className={`text-[13px] font-medium leading-none truncate ${active===key ? "text-on-primary" : "text-on-surface"}`}>{p.display_name}</div>
-                  <div className={`text-[11px] mt-1 truncate ${active===key ? "text-on-primary/80" : "text-on-surface-variant"}`}>{p.mappings.length} mappings Â· {p.description.split("Â·")[0]?.trim() || p.description.slice(0,22)}</div>
+                  <div className={`text-[11px] mt-1 truncate ${active===key ? "text-on-primary/80" : "text-on-surface-variant"}`}>{p.mappings.length} mappings · {p.description.split("·")[0]?.trim() || p.description.slice(0,22)}</div>
                 </div>
                 {active===key && <div className="w-1.5 h-1.5 rounded-full bg-on-primary flex-shrink-0" />}
               </button>
@@ -253,7 +253,7 @@ export default function App() {
               <div className="w-8 h-8 rounded-lg bg-primary text-on-primary grid place-items-center"><Zap size={14} /></div>
               <div>
                 <div className="text-[11px] font-medium text-on-surface leading-none">Native Engine</div>
-                <div className="text-[11px] text-on-surface-variant mt-1">Rust â€¢ 0.02ms â€¢ WH_KEYBOARD_LL</div>
+                <div className="text-[11px] text-on-surface-variant mt-1">Rust • 0.02ms • WH_KEYBOARD_LL</div>
               </div>
             </div>
           </div>
@@ -270,7 +270,7 @@ export default function App() {
             </div>
           </div>
           <div className="px-5 py-2.5 flex items-center justify-between text-[10px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
-            <span>{prof.mappings.length} MAPPINGS</span><span className="font-normal tracking-wide text-outline">SOURCE â†’ TARGET</span>
+            <span>{prof.mappings.length} MAPPINGS</span><span className="font-normal tracking-wide text-outline">SOURCE → TARGET</span>
           </div>
           <div className="flex-1 min-h-0 overflow-auto p-3 space-y-1.5 bg-surface-container">
             {prof.mappings.length===0 ? (
@@ -283,7 +283,7 @@ export default function App() {
             ) : prof.mappings.map(([s,d])=>(
               <div key={s} className="h-[46px] bg-surface-container-high border border-outline-variant rounded-xl flex items-center px-3 gap-2.5">
                 <span className="px-3 py-1 rounded-full bg-surface-container-highest border border-outline-variant text-[11px] font-mono font-medium min-w-[64px] text-center text-on-surface">{s}</span>
-                <span className="w-6 h-6 rounded-full bg-primary text-on-primary grid place-items-center text-[10px] font-medium">â†’</span>
+                <span className="w-6 h-6 rounded-full bg-primary text-on-primary grid place-items-center text-[10px] font-medium">→</span>
                 <span className="px-3 py-1 rounded-full bg-primary-container text-on-primary-container text-[11px] font-mono font-medium min-w-[64px] text-center border border-outline-variant">{d}</span>
                 <span className="hidden sm:block text-[11px] text-on-surface-variant ml-1">remap</span>
                 <div className="ml-auto flex items-center gap-1">
@@ -304,7 +304,7 @@ export default function App() {
           <div className="w-full max-w-[440px] bg-surface-container rounded-[28px] border border-outline-variant p-5 shadow-m3-3" onClick={e=>e.stopPropagation()}>
             <h3 className="text-[14px] font-display font-semibold text-on-surface">Add mapping</h3>
             <p className="text-[11px] text-on-surface-variant mt-1">Choose source and target</p>
-            {capturing && <p className="mt-3 text-[11px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-1.5 text-center">Capturingâ€¦ press a key ({capturing})</p>}
+            {capturing && <p className="mt-3 text-[11px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-1.5 text-center">Capturing… press a key ({capturing})</p>}
             <div className="grid grid-cols-2 gap-3 mt-4 items-start">
               <div>
                 <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
@@ -323,7 +323,7 @@ export default function App() {
             </div>
             <div className="flex items-center justify-center gap-3 mt-5 p-3 rounded-[16px] bg-surface-container-high border border-outline-variant">
               <span className="px-4 py-2 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono text-on-surface min-w-[72px] text-center shadow-sm">{srcKey}</span>
-              <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium shadow-m3-1">â†’</span>
+              <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium shadow-m3-1">→</span>
               <span className="px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono border border-outline-variant min-w-[72px] text-center shadow-sm">{dstKey}</span>
             </div>
             <div className="flex gap-3 mt-6">
@@ -341,10 +341,10 @@ export default function App() {
                 <span className="w-10 h-10 rounded-[12px] bg-primary text-on-primary grid place-items-center"><Settings size={18}/></span>
                 <div>
                   <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Settings</h3>
-                  <p className="text-[11px] text-on-surface-variant mt-1">Educational â€¢ All explained â€¢ Monochrome</p>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Educational • All explained • Monochrome</p>
                 </div>
               </div>
-              <button onClick={()=> setShowSettings(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-error-container hover:border-error hover:text-on-error-container grid place-items-center text-on-surface-variant transition-colors">âœ•</button>
+              <button onClick={()=> setShowSettings(false)} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-error-container hover:border-error hover:text-on-error-container grid place-items-center text-on-surface-variant transition-colors">✕</button>
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-4 bg-surface-container">
               <div className="rounded-xl bg-primary-container/20 border border-outline-variant p-3 flex gap-3">
@@ -382,7 +382,7 @@ export default function App() {
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-[12px] bg-tertiary-container text-on-tertiary-container grid place-items-center flex-shrink-0"><Mouse size={16}/></span>
                     <div className="flex-1">
-                      <div className="text-[13px] font-medium text-on-surface">Left-handed mouse â€” invert clicks</div>
+                      <div className="text-[13px] font-medium text-on-surface">Left-handed mouse — invert clicks</div>
                       <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Swap primary/secondary button with <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Restored on exit.</div>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer ml-2">
@@ -418,5 +418,3 @@ export default function App() {
     </div>
   );
 }
-
-
