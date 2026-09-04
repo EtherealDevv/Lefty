@@ -305,7 +305,7 @@ export default function App() {
             <h3 className="text-[14px] font-display font-semibold text-on-surface">Add mapping</h3>
             <p className="text-[11px] text-on-surface-variant mt-1">Choose source and target</p>
             {capturing && <p className="mt-3 text-[11px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-1.5 text-center">Capturing… press a key ({capturing})</p>}
-            <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="grid grid-cols-2 gap-3 mt-4 items-start">
               <div>
                 <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
                 <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
