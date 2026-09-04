@@ -196,6 +196,10 @@ fn set_autostart(enabled: bool) -> Result<String, String> {
     } else { exe };
     let exe_str = exe.to_string_lossy().to_string();
     let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    // Clean old wrong entries (Lefty_fix, lefty-tauri) that caused Task Manager to show Lefty_fix
+    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty_fix", "/f"]).output();
+    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "lefty-tauri", "/f"]).output();
+    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty-tauri", "/f"]).output();
     let status = if enabled {
         std::process::Command::new("reg").args(["add", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe_str), "/f"]).output().map_err(|e| e.to_string())?
     } else {
