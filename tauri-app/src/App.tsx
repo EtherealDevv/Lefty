@@ -152,14 +152,11 @@ export default function App() {
     const t = setTimeout(() => {
       let shouldEnable = true;
       try { const v = localStorage.getItem("lefty_launch_active"); if (v !== null) shouldEnable = v === "true"; } catch {}
-      invoke("set_engine_enabled", {enabled: shouldEnable}).catch(()=>{});
       if (shouldEnable) {
         invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
         setEnabled(true);
       } else {
-        invoke("update_mappings", {mappings: profiles[active].mappings}).catch(()=>{});
         setEnabled(false);
-        invoke("stop_engine").catch(()=>{});
       }
     }, 400);
     const id = setInterval(async () => {
