@@ -44,7 +44,6 @@ export default function App() {
   const [autostart, setAutostart] = useState(false);
   const [hideToTray, setHideToTray] = useState(true);
   const [hotkey, setHotkey] = useState("F6");
-  const [hotkeyOptions] = useState(["F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [launchActive, setLaunchActive] = useState(() => {
     try { const v = localStorage.getItem("lefty_launch_active"); return v === null ? true : v === "true"; } catch { return true; }
@@ -94,7 +93,6 @@ export default function App() {
 
   useEffect(() => {
     try { localStorage.setItem("lefty_launch_active", String(launchActive)); } catch {}
-    invoke("set_engine_enabled", {enabled: launchActive}).catch(()=>{});
   }, [launchActive]);
 
   useEffect(() => {
@@ -442,7 +440,7 @@ export default function App() {
                       <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Key to pause/resume remaps without closing Lefty. Default <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">F6</span>.</div>
                       <div className="mt-3 flex items-center gap-2">
                         <select value={hotkey} onChange={e=>{ const v=e.target.value; setHotkey(v); invoke("set_hotkey",{hotkey:v}).catch(()=>{}); }} className="h-10 rounded-xl bg-surface-container-highest border border-outline-variant text-[13px] font-mono px-3 text-on-surface min-w-[110px]">
-                          {hotkeyOptions.map(k=> <option key={k} value={k}>{k}</option>)}
+                          {allKeys.map(k=> <option key={k} value={k}>{k}</option>)}
                         </select>
                         <span className="text-[11px] text-on-surface-variant">Saved to <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">%APPDATA%\Lefty\hotkey.txt</span></span>
                       </div>

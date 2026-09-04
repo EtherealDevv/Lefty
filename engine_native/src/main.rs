@@ -186,13 +186,37 @@ fn main() {
     });
     // Watch hotkey file for custom hotkey (F6 default)
     let hotkey_path = if let Ok(a) = env::var("APPDATA") { PathBuf::from(a).join("Lefty").join("hotkey.txt") } else { PathBuf::from("hotkey.txt") };
-    // Load initial hotkey
-    if let Ok(s) = fs::read_to_string(&hotkey_path) {
+    // Helper to map hotkey name to VK (any key, not just F6-F12)
+    fn hotkey_str_to_vk(s: &str) -> Option<u32> {
         let n = s.trim().to_uppercase();
-        if let Some(vk) = match n.as_str() {
-            "F6"=>Some(0x75), "F7"=>Some(0x76), "F8"=>Some(0x77), "F9"=>Some(0x78), "F10"=>Some(0x79), "F11"=>Some(0x7A), "F12"=>Some(0x7B),
-            _=>None
-        } {
+        // Try direct VK_MAP-like mapping for common keys
+        let vk = match n.as_str() {
+            "A"=>0x41, "B"=>0x42, "C"=>0x43, "D"=>0x44, "E"=>0x45, "F"=>0x46, "G"=>0x47, "H"=>0x48, "I"=>0x49, "J"=>0x4A, "K"=>0x4B, "L"=>0x4C, "M"=>0x4D, "N"=>0x4E, "O"=>0x4F, "P"=>0x50, "Q"=>0x51, "R"=>0x52, "S"=>0x53, "T"=>0x54, "U"=>0x55, "V"=>0x56, "W"=>0x57, "X"=>0x58, "Y"=>0x59, "Z"=>0x5A,
+            "0"=>0x30, "1"=>0x31, "2"=>0x32, "3"=>0x33, "4"=>0x34, "5"=>0x35, "6"=>0x36, "7"=>0x37, "8"=>0x38, "9"=>0x39,
+            "F1"=>0x70, "F2"=>0x71, "F3"=>0x72, "F4"=>0x73, "F5"=>0x74, "F6"=>0x75, "F7"=>0x76, "F8"=>0x77, "F9"=>0x78, "F10"=>0x79, "F11"=>0x7A, "F12"=>0x7B, "F13"=>0x7C, "F14"=>0x7D, "F15"=>0x7E, "F16"=>0x7F, "F17"=>0x80, "F18"=>0x81, "F19"=>0x82, "F20"=>0x83,
+            "ESC"=>0x1B, "SPACE"=>0x20, "ENTER"=>0x0D, "TAB"=>0x09, "BACKSPACE"=>0x08, "CAPSLOCK"=>0x14, "CAPS"=>0x14,
+            "SHIFT"=>0x10, "LSHIFT"=>0xA0, "RSHIFT"=>0xA1, "CTRL"=>0x11, "LCTRL"=>0xA2, "RCTRL"=>0xA3, "ALT"=>0x12, "LALT"=>0xA4, "RALT"=>0xA5, "LWIN"=>0x5B, "RWIN"=>0x5C,
+            "UP"=>0x26, "DOWN"=>0x28, "LEFT"=>0x25, "RIGHT"=>0x27, "INSERT"=>0x2D, "DELETE"=>0x2E, "HOME"=>0x24, "END"=>0x23, "PAGEUP"=>0x21, "PAGEDOWN"=>0x22, "NUMLOCK"=>0x90, "SCROLLLOCK"=>0x91, "PRINTSCREEN"=>0x2C, "PAUSE"=>0x13,
+            "OEM_1"=>0xBA, "OEM_PLUS"=>0xBB, "OEM_COMMA"=>0xBC, "OEM_MINUS"=>0xBD, "OEM_PERIOD"=>0xBE, "OEM_2"=>0xBF, "OEM_3"=>0xC0, "OEM_4"=>0xDB, "OEM_5"=>0xDC, "OEM_6"=>0xDD, "OEM_7"=>0xDE, "OEM_8"=>0xDF, "OEM_102"=>0xE2,
+            "Ñ"=>0xBA, "´"=>0xDB, "Ç"=>0xDE, "¨"=>0xDB,
+            _ => {
+                if n.starts_with("0X") {
+                    if let Ok(v) = u32::from_str_radix(n.trim_start_matches("0X"), 16) { return Some(v); }
+                }
+                if let Ok(v) = n.parse::<u32>() { return Some(v); }
+                if n.starts_with("VK_") {
+                    let rest = n.trim_start_matches("VK_");
+                    if let Ok(v) = u32::from_str_radix(rest, 16) { return Some(v); }
+                    if let Ok(v) = rest.parse::<u32>() { return Some(v); }
+                }
+                return None;
+            }
+        };
+        Some(vk)
+    }
+    // Load initial hotkey (any key)
+    if let Ok(s) = fs::read_to_string(&hotkey_path) {
+        if let Some(vk) = hotkey_str_to_vk(&s) {
             HOTKEY_VK.store(vk, Ordering::SeqCst);
         }
     }
@@ -205,12 +229,7 @@ fn main() {
                 let n = s.trim().to_uppercase();
                 if n != last_hotkey.trim().to_uppercase() {
                     last_hotkey = s.clone();
-                    let vk = match n.as_str() {
-                        "F6"=>Some(0x75), "F7"=>Some(0x76), "F8"=>Some(0x77), "F9"=>Some(0x78), "F10"=>Some(0x79), "F11"=>Some(0x7A), "F12"=>Some(0x7B),
-                        "F1"=>Some(0x70), "F2"=>Some(0x71), "F3"=>Some(0x72), "F4"=>Some(0x73), "F5"=>Some(0x74),
-                        _=>None
-                    };
-                    if let Some(v) = vk {
+                    if let Some(v) = hotkey_str_to_vk(&n) {
                         HOTKEY_VK.store(v, Ordering::SeqCst);
                     }
                 }
