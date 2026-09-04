@@ -118,8 +118,9 @@ export default function App() {
 
   const prof = profiles[active];
   const toggle = async () => {
+    const next = !enabled;
+    setEnabled(next);
     try {
-      const next = !enabled;
       await invoke("set_engine_enabled", {enabled: next}).catch(()=>{});
       if (next) {
         await invoke("update_mappings", { mappings: prof.mappings });
@@ -127,9 +128,8 @@ export default function App() {
       } else {
         await invoke("stop_engine");
       }
-      setEnabled(next);
     } catch {
-      setEnabled(!enabled);
+      setEnabled(!next);
     }
   };
 
@@ -154,7 +154,7 @@ export default function App() {
         const state = await invoke<boolean>("get_engine_enabled");
         setEnabled(prev => prev !== state ? state : prev);
       } catch {}
-    }, 300);
+    }, 100);
     return () => { clearTimeout(t); clearInterval(id); };
   }, [profiles, active]);
 
