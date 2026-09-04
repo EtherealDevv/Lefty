@@ -19,3 +19,7 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_Thre
 [features]
 default = [ "custom-protocol" ]
 custom-protocol = [ "tauri/custom-protocol" ]
+
+[[bin]]
+name = "Lefty"
+path = "src/main.rs"

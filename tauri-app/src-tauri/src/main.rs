@@ -182,11 +182,20 @@ fn get_hotkey() -> Result<String, String> {
 
 #[tauri::command]
 fn set_autostart(enabled: bool) -> Result<String, String> {
-    // Windows Run key (auto-start)
+    // Windows Run key (auto-start) — always use Lefty.exe for correct Task Manager name
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = if exe.file_name().map(|n| n.to_string_lossy().to_lowercase() != "lefty.exe").unwrap_or(true) {
+        if let Some(base) = exe.parent() {
+            let cand = base.join("Lefty.exe");
+            if cand.exists() { cand } else {
+                // Also check Program Files Lefty
+                let prog = PathBuf::from("C:\\Program Files\\Lefty\\Lefty.exe");
+                if prog.exists() { prog } else { exe }
+            }
+        } else { exe }
+    } else { exe };
     let exe_str = exe.to_string_lossy().to_string();
     let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    // Usar reg.exe para no necesitar winreg crate
     let status = if enabled {
         std::process::Command::new("reg").args(["add", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe_str), "/f"]).output().map_err(|e| e.to_string())?
     } else {
