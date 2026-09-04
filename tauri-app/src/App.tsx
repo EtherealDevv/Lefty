@@ -145,6 +145,7 @@ export default function App() {
     const t = setTimeout(() => {
       invoke("set_engine_enabled", {enabled: false}).catch(()=>{});
       setEnabled(false);
+      invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
     }, 400);
     return () => clearTimeout(t);
   }, []);
