@@ -315,7 +315,7 @@ export default function App() {
               </div>
               <div>
                 <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET</label>
-                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-1 w-full h-9 rounded-xl bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
+                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-full bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
                 <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture target</button>
