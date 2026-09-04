@@ -134,8 +134,8 @@ export default function App() {
         await invoke("stop_engine");
       }
       setEnabled(next);
-      setLaunchActive(next);
-      try { localStorage.setItem("lefty_launch_active", String(next)); } catch {}
+    } catch {
+      setEnabled(!enabled);
     } catch {
       setEnabled(!enabled);
     }
