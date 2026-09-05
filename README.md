@@ -29,13 +29,6 @@ cd Lefty
 
 > Run as **Administrator** for games that run elevated.
 
-Ultra low latency (0.5ms):
-1. Download `Interception.zip` from https://github.com/oblitum/Interception/releases
-2. CMD admin: `install-interception.exe /install`
-3. Reboot
-4. `pip install interception`
-5. Select `Ultra` in Lefty
-
 ## Profiles
 
 | Profile | Mapping |
@@ -59,7 +52,6 @@ Ultra low latency (0.5ms):
 | Method | Latency |
 |--------|---------|
 | Registry | 0ms (reboot, not dynamic) |
-| **Interception** | **~0.5ms** |
 | **Lefty** | **~0.02ms** |
 | AutoHotkey | 5-15ms |
 
