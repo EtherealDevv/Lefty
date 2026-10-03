@@ -517,7 +517,7 @@ export default function App() {
                       <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0">{soundsOn ? <Volume2 size={16}/> : <VolumeX size={16}/>}</span>
                       <div className="flex-1">
                         <div className="text-[13px] font-medium text-on-surface">Interface sounds</div>
-                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Soft chime on activate, lower chime on pause. Synthesized, no Windows sounds.</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Soft chime on activate, lower chime on pause.</div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={soundsOn} onChange={e=>{ const v=e.target.checked; setSoundsOn(v); setSoundEnabled(v); if (v) playToggleSound(true); }} className="sr-only peer" />

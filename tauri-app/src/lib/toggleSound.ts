@@ -1,5 +1,4 @@
-// Earcons propios para Activate/Pause — sintetizados con WebAudio.
-// Sin archivos de audio y sin sonidos del sistema de Windows:
+// Earcons propios para Activate/Pause, sintetizados con WebAudio.
 //  - ON: quinta ascendente brillante (C5 → G5) con cuerpo cálido.
 //  - OFF: quinta descendente suave (G5 → C5), un poco más tenue.
 
