@@ -87,4 +87,22 @@ code, pre, .font-mono { font-family: var(--md-sys-typescale-code-font); }
   .m3-shape-lg { border-radius: var(--md-sys-shape-corner-large); }
   .m3-shape-md { border-radius: var(--md-sys-shape-corner-medium); }
   .m3-shape-full { border-radius: var(--md-sys-shape-corner-full); }
+  .m3-will-change { will-change: transform, opacity; backface-visibility: hidden; transform: translateZ(0); }
+  .m3-pressable { transition: transform 100ms var(--md-sys-motion-easing-emphasized), opacity 100ms var(--md-sys-motion-easing-standard); }
+  .m3-pressable:active { transform: scale(0.97); }
+  .m3-backdrop { will-change: opacity; backface-visibility: hidden; transform: translateZ(0); }
+  .m3-modal { will-change: transform, opacity; backface-visibility: hidden; transform: translateZ(0); }
+}
+
+/* Accent color — cross-fade suave al cambiar de preset.
+   Cubre todo lo teñido por --md-sys-color-primary* sin romper
+   el motion pressable (se conserva transform/opacity/box-shadow). */
+[class*="bg-primary"], [class*="text-primary"], [class*="border-primary"],
+[class*="bg-on-primary"], [class*="text-on-primary"] {
+  transition: background-color 350ms var(--md-sys-motion-easing-emphasized),
+    border-color 350ms var(--md-sys-motion-easing-emphasized),
+    color 350ms var(--md-sys-motion-easing-emphasized),
+    transform 150ms var(--md-sys-motion-easing-emphasized),
+    opacity 150ms var(--md-sys-motion-easing-standard),
+    box-shadow 200ms var(--md-sys-motion-easing-standard);
 }

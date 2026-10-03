@@ -48,8 +48,14 @@ pub fn is_numpad_originated(vk: u32) -> bool {
 }
 
 // VK_NUMPAD0..9 + VK_DECIMAL list
+#[inline(always)]
 pub fn is_numpad_key_affected_by_shift(vk: u32) -> bool {
     matches!(vk, 0x60 | 0x61 | 0x62 | 0x63 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6E)
+}
+
+#[inline(always)]
+pub fn get_scan_code_cached(vk: u32) -> u16 {
+    crate::state::vk_to_scan_cached(vk)
 }
 
 // GetCombinedKey helper
@@ -86,7 +92,7 @@ pub fn is_modifier_key(vk: u32) -> bool {
     get_key_type(vk) != KeyType::Action
 }
 
-// IsExtendedKey list
+#[inline(always)]
 pub fn is_extended_key(vk: u32) -> bool {
     matches!(
         vk,

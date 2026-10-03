@@ -12,6 +12,10 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 
 - **WASD → IJKL** (or arrows, numpad) for left-hand movement
 - Map any key to any other: `W→I`, `Q→U`, `Caps→Ctrl`, `Win→Disabled`
+- Add-mapping validation: duplicate sources and self-maps are blocked inline
+- Accent Color themes: 10 presets + custom picker (Settings → Appearance)
+- Profile Import/Export to `.json` with merge or replace modes
+- Tabbed Settings: General, Appearance, Input, Profiles, About
 - Works in any game (low-level hook)
 - Very low latency (0.02ms Rust, 0.5ms with Interception driver)
 - Clean dark UI
@@ -24,7 +28,7 @@ cd Lefty
 # Run
 .\dist\Lefty.exe
 # Or install
-.\dist\Lefty_1.1.0_x64-setup.exe
+.\dist\Lefty_1.3.0_x64-setup.exe
 ```
 
 > Run as **Administrator** for games that run elevated.
@@ -42,10 +46,11 @@ cd Lefty
 ## Usage
 
 1. Pick a profile on the left
-2. **Add** or **Capture** a mapping (`W` → `I`)
+2. **Add** or **Capture** a mapping (`W` → `I`, duplicates rejected)
 3. **Activate**
 4. Play (activate before launching the game)
 5. **Pause** to restore, `F6` to toggle, close to tray
+6. Back up via Settings → Profiles → Export, restore via Import
 
 ## Latency
 

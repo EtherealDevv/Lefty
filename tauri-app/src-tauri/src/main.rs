@@ -21,7 +21,49 @@ static ORIGINAL_SWAP_STATE: OnceLock<Mutex<Option<bool>>> = OnceLock::new();
 
 #[tauri::command]
 fn is_admin() -> bool {
-    unsafe { windows::Win32::UI::Shell::IsUserAnAdmin().as_bool() }
+    // Check elevation, not just group membership (UAC)
+    unsafe {
+        let is_member = windows::Win32::UI::Shell::IsUserAnAdmin().as_bool();
+        use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        use windows::Win32::Foundation::HANDLE;
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return is_member;
+        }
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut ret_len: u32 = 0;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut std::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        );
+        let _ = windows::Win32::Foundation::CloseHandle(token);
+        if ok.is_ok() {
+            is_member && elevation.TokenIsElevated != 0
+        } else {
+            is_member
+        }
+    }
+}
+
+#[tauri::command]
+fn restart_as_admin() -> Result<String, String> {
+    unsafe {
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_NORMAL;
+        if let Ok(exe) = std::env::current_exe() {
+            let exe_w: Vec<u16> = exe.to_string_lossy().encode_utf16().chain(Some(0)).collect();
+            let op: Vec<u16> = "runas\0".encode_utf16().collect();
+            ShellExecuteW(HWND(std::ptr::null_mut()), PCWSTR(op.as_ptr()), PCWSTR(exe_w.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_NORMAL);
+            std::process::exit(0);
+        }
+        Err("No se pudo obtener exe".to_string())
+    }
 }
 
 #[tauri::command]
@@ -136,7 +178,7 @@ fn get_engine_enabled() -> Result<bool, String> {
     if let Ok(s) = fs::read_to_string(&path) {
         Ok(s.trim() == "1")
     } else {
-        Ok(true)
+        Ok(false)
     }
 }
 
@@ -432,9 +474,20 @@ fn capture_key() -> Result<String, String> {
 #[tauri::command]
 fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandle) -> Result<String, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    if guard.is_some() {
-        return Ok("already running".into());
+    if let Some(child) = guard.as_mut() {
+        match child.try_wait() {
+            // Hijo vivo de verdad: no duplicar.
+            Ok(None) => return Ok("already running".into()),
+            // Hijo muerto (crash, taskkill externo, víctima del viejo singleton
+            // suicida): soltar el slot y re-spawnear abajo en vez de mentir.
+            _ => { *guard = None; }
+        }
     }
+    // Sin hijo rastreado puede quedar un huérfano/zombi de una sesión previa
+    // (builds viejos sin salida limpia). Reaped seguro: nuestra imagen es otra,
+    // aquí no hay suicidio posible como en el singleton del engine.
+    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let exe = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         PathBuf::from(manifest_dir).join("../../engine_native/target/release/lefty_engine.exe")
     } else {
@@ -492,7 +545,103 @@ fn stop_engine(state: State<EngineState>) -> Result<String, String> {
     }
 }
 
+fn kill_existing_instances() {
+    // Mata solo instancias que no son la actual (evita suicidio del segundo Lefty)
+    let current_pid = std::process::id();
+    unsafe {
+        use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+        use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if let Ok(h) = snapshot {
+            let mut entry = PROCESSENTRY32W::default();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            if Process32FirstW(h, &mut entry).is_ok() {
+                loop {
+                    let exe_name = String::from_utf16_lossy(&entry.szExeFile[..]).trim_matches('\0').to_lowercase();
+                    let pid = entry.th32ProcessID;
+                    if pid != current_pid && (exe_name == "lefty.exe" || exe_name == "lefty_engine.exe") {
+                        let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
+                    }
+                    if Process32NextW(h, &mut entry).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(h);
+        }
+    }
+    // Fallback por si ToolHelp falla: intenta taskkill pero ya filtramos PID, así que no mata al actual si usamos /PID
+    // También intenta cerrar ventana graceful
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+        use windows::core::PCWSTR;
+        let title_w: Vec<u16> = "Lefty v2\0".encode_utf16().collect();
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title_w.as_ptr())) {
+            if !hwnd.0.is_null() {
+                let _ = PostMessageW(hwnd, WM_CLOSE, windows::Win32::Foundation::WPARAM(0), windows::Win32::Foundation::LPARAM(0));
+            }
+        }
+    }
+}
+
+fn check_single_instance() -> bool {
+    unsafe {
+        use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+        use windows::Win32::System::Threading::CreateMutexW;
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONQUESTION, MB_TOPMOST, IDYES};
+        use windows::Win32::Foundation::HWND;
+        use windows::core::PCWSTR;
+
+        let name: Vec<u16> = "Global\\LeftySingleton\0".encode_utf16().collect();
+        let mutex = match CreateMutexW(None, true, PCWSTR(name.as_ptr())) {
+            Ok(h) => h,
+            Err(_) => return true,
+        };
+        let err = GetLastError();
+        if err == ERROR_ALREADY_EXISTS {
+            let msg: Vec<u16> = "Lefty is already running. Do you want to close the current instance and open a new one?\0".encode_utf16().collect();
+            let caption: Vec<u16> = "Lefty - Already running\0".encode_utf16().collect();
+            let ret = MessageBoxW(HWND(std::ptr::null_mut()), PCWSTR(msg.as_ptr()), PCWSTR(caption.as_ptr()), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
+            if ret == IDYES {
+                let _ = CloseHandle(mutex);
+                kill_existing_instances();
+                // Esperar a que el mutex se libere y el engine muera (hasta 3s)
+                for _ in 0..30 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let name2: Vec<u16> = "Global\\LeftySingleton\0".encode_utf16().collect();
+                    if let Ok(h2) = CreateMutexW(None, true, PCWSTR(name2.as_ptr())) {
+                        let err2 = GetLastError();
+                        if err2 != ERROR_ALREADY_EXISTS {
+                            std::mem::forget(Box::new(h2));
+                            return true;
+                        } else {
+                            let _ = CloseHandle(h2);
+                        }
+                    }
+                    // Reintentar matar si sigue vivo
+                    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "Lefty.exe"]).output();
+                    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                }
+                // Si no se liberó, intentar igual y continuar
+                let name2: Vec<u16> = "Global\\LeftySingleton\0".encode_utf16().collect();
+                if let Ok(h2) = CreateMutexW(None, true, PCWSTR(name2.as_ptr())) {
+                    std::mem::forget(Box::new(h2));
+                }
+                return true;
+            } else {
+                let _ = CloseHandle(mutex);
+                return false;
+            }
+        }
+        std::mem::forget(Box::new(mutex));
+        true
+    }
+}
+
 fn main() {
+    if !check_single_instance() {
+        std::process::exit(0);
+    }
     #[cfg(not(debug_assertions))]
     {
         if !is_admin() {
@@ -562,7 +711,7 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
@@ -578,7 +727,32 @@ fn main() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(mut child) = guard.take() {
                             let _ = child.kill();
+                            let _ = child.wait();
                         }
+                    }
+                }
+                // Fallback: asegura que no quede lefty_engine huérfano (si fue lanzado y no está en EngineState)
+                let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                // También limpiar mutex para single instance
+                let _ = std::fs::remove_file(std::env::temp_dir().join("lefty_single_instance.lock"));
+            }
+            // Si el usuario cierra la ventana y no es hide_to_tray, también matar engine en CloseRequested
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { .. }, .. } = &event {
+                if label == "main" {
+                    // Verificar si hide_to_tray es false, entonces la ventana se está cerrando realmente
+                    let hide = std::fs::read_to_string(
+                        std::env::var("APPDATA").map(|a| PathBuf::from(a).join("Lefty").join("hide_tray.txt")).unwrap_or(PathBuf::from("hide_tray.txt"))
+                    ).map(|s| s.trim() != "0").unwrap_or(true);
+                    if !hide {
+                        if let Some(state) = app.try_state::<EngineState>() {
+                            if let Ok(mut guard) = state.0.lock() {
+                                if let Some(mut child) = guard.take() {
+                                    let _ = child.kill();
+                                    let _ = child.wait();
+                                }
+                            }
+                        }
+                        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
                     }
                 }
             }

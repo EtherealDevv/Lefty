@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 — 2026-10-03
+- Engine: fixed hotkey dead after manual Activate (singleton self-kill via
+  taskkill + zombie parent-watcher missing WM_QUIT); `start_engine` now reaps
+  orphans and respawns dead children
+- Settings redesigned with sidebar tabs: General, Appearance, Input, Profiles, About
+- Accent Color: 10 presets + custom picker, whole M3 theme regenerates from seed
+- Add Mapping validation: duplicate sources and self-maps blocked inline
+- Profile Import/Export to `.json` with merge or replace modes
+
 ## 1.1.0 — 2026-09-02
 - low-level port (WH_KEYBOARD_LL, SendInput, wScan, SINGLEKEY_FLAG)
 - Rust engine 0.02ms TIME_CRITICAL, no GIL
