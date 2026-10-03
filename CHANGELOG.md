@@ -8,6 +8,7 @@
 - Accent Color: 10 presets + custom picker, whole M3 theme regenerates from seed
 - Add Mapping validation: duplicate sources and self-maps blocked inline
 - Profile Import/Export to `.json` with merge or replace modes
+- Interface sounds: synthesized activate/pause chimes (no Windows sounds)
 
 ## 1.1.0 — 2026-09-02
 - low-level port (WH_KEYBOARD_LL, SendInput, wScan, SINGLEKEY_FLAG)

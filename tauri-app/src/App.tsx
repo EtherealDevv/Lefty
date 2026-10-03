@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
-import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import laskIcon from "./LASK.png";
 import ProfileImportExport from "./components/ProfileImportExport";
 import AccentColorSection from "./components/AccentColorSection";
 import { useMappingValidation } from "./lib/useMappingValidation";
+import { isSoundEnabled, setSoundEnabled, playToggleSound, unlockAudio } from "./lib/toggleSound";
 
 type Mapping = [string, string];
 type Profile = { display_name: string; description: string; icon: string; mappings: Mapping[] };
@@ -81,6 +82,28 @@ export default function App() {
   const [hotkey, setHotkey] = useState("F6");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
+  const [soundsOn, setSoundsOn] = useState<boolean>(() => isSoundEnabled());
+
+  // Desbloquear WebAudio con el primer gesto (autoplay policy del WebView)
+  useEffect(() => {
+    const unlock = () => unlockAudio();
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  // Chime al cambiar ACTIVE/INACTIVE (botón o hotkey); sin sonido en el sync inicial
+  const firstEnabledSync = useRef(true);
+  useEffect(() => {
+    if (firstEnabledSync.current) {
+      firstEnabledSync.current = false;
+      return;
+    }
+    playToggleSound(enabled);
+  }, [enabled]);
 
   const closeAdd = () => {
     setClosingAdd(true);
@@ -372,9 +395,8 @@ export default function App() {
               </div>
             ))}
           </div>
-          <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-between">
-            <span className="text-[11px] font-mono text-on-surface-variant">{prof.mappings.length} active</span>
-            <button onClick={()=>setShowAdd(true)} className="sm:hidden h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5"><Plus size={14}/>Add</button>
+          <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-end sm:hidden">
+            <button onClick={()=>setShowAdd(true)} className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5"><Plus size={14}/>Add</button>
           </div>
         </main>
       </div>
@@ -488,6 +510,17 @@ export default function App() {
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={hideToTray} onChange={e=>{ const v=e.target.checked; setHideToTray(v); invoke("set_hide_to_tray",{enabled:v}).catch(()=>{}); }} className="sr-only peer" />
+                        <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
+                      </label>
+                    </div>
+                    <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                      <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0">{soundsOn ? <Volume2 size={16}/> : <VolumeX size={16}/>}</span>
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium text-on-surface">Interface sounds</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Soft chime on activate, lower chime on pause. Synthesized, no Windows sounds.</div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={soundsOn} onChange={e=>{ const v=e.target.checked; setSoundsOn(v); setSoundEnabled(v); if (v) playToggleSound(true); }} className="sr-only peer" />
                         <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
                       </label>
                     </div>

@@ -15,6 +15,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 - Add-mapping validation: duplicate sources and self-maps are blocked inline
 - Accent Color themes: 10 presets + custom picker (Settings → Appearance)
 - Profile Import/Export to `.json` with merge or replace modes
+- Interface sounds: distinct chimes for activate vs pause (Settings → General)
 - Tabbed Settings: General, Appearance, Input, Profiles, About
 - Works in any game (low-level hook)
 - Very low latency (0.02ms Rust, 0.5ms with Interception driver)
