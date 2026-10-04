@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX } from "lucide-react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import laskIcon from "./LASK.png";
@@ -79,6 +79,10 @@ export default function App() {
   const [allKeys, setAllKeys] = useState<string[]>(FALLBACK_ALL_KEYS);
   const [autostart, setAutostart] = useState(false);
   const [hideToTray, setHideToTray] = useState(true);
+  const [startMinimized, setStartMinimized] = useState(false);
+  const [startActive, setStartActive] = useState<boolean>(() => {
+    try { return localStorage.getItem("lefty_start_active") === "true"; } catch { return false; }
+  });
   const [hotkey, setHotkey] = useState("F6");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
@@ -97,6 +101,9 @@ export default function App() {
 
   // Chime al cambiar ACTIVE/INACTIVE (botón o hotkey); sin sonido en el sync inicial
   const firstEnabledSync = useRef(true);
+  // El arranque (fichero + spawn del engine) se ejecuta UNA sola vez por
+  // sesión: los re-runs del efecto por profiles/active solo reponen el poll.
+  const launchedRef = useRef(false);
   useEffect(() => {
     if (firstEnabledSync.current) {
       firstEnabledSync.current = false;
@@ -144,8 +151,8 @@ export default function App() {
     }).catch(()=>{});
     invoke<boolean>("get_autostart").then(setAutostart).catch(()=>{});
     invoke<boolean>("get_hide_to_tray").then(setHideToTray).catch(()=>{});
+    invoke<boolean>("get_start_minimized").then(setStartMinimized).catch(()=>{});
     invoke<string>("get_hotkey").then(v=> v && setHotkey(v.toUpperCase())).catch(()=>{});
-    invoke<boolean>("get_engine_enabled").then(setEnabled).catch(()=>{});
   }, []);
 
   useEffect(() => {
@@ -205,21 +212,44 @@ export default function App() {
   // Validación en tiempo real del modal Add contra el perfil activo
   const mappingValidation = useMappingValidation(srcKey, dstKey, prof.mappings);
   const toggle = async () => {
+    // Optimista: la UI y el chime son instantáneos; f6_toggle.txt manda y el poll corrige.
+    const next = !enabled;
+    setEnabled(next);
     try {
-      if (enabled) {
-        await invoke("set_engine_enabled", {enabled: false}).catch(()=>{});
-        await invoke("stop_engine");
-        setEnabled(false);
-      } else {
-        await invoke("set_engine_enabled", {enabled: true}).catch(()=>{});
+      await invoke("set_engine_enabled", { enabled: next });
+      if (next) {
         await invoke("update_mappings", { mappings: prof.mappings });
         await invoke("start_engine", { profile: active });
-        setEnabled(true);
+      } else {
+        await invoke("stop_engine");
       }
     } catch {
-      setEnabled(!enabled);
+      /* el poll de 100ms resincroniza desde f6_toggle.txt */
     }
   };
+
+  // Switch segmentado del header: una sola píldora, thumb deslizante.
+  // Misma función que el botón anterior (clic o Espacio/Enter).
+  const renderStatusSwitch = (compact: boolean) => (
+    <div
+      role="switch"
+      aria-checked={enabled}
+      aria-label={enabled ? "Pause mappings" : "Activate mappings"}
+      tabIndex={0}
+      onClick={toggle}
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } }}
+      className="flex items-center rounded-full bg-surface-container-high border border-outline-variant p-1 relative shadow-m3-1 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+    >
+      <span aria-hidden className={`absolute top-1 bottom-1 rounded-full bg-primary shadow-m3-1 transition-all duration-300 ease-out ${enabled ? "left-1/2 right-1" : "left-1 right-1/2"}`} />
+      <span className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors duration-300 ${compact ? "h-7 w-[86px] text-[12px]" : "h-9 w-[120px] text-[13px]"} ${!enabled ? "text-on-primary" : "text-on-surface-variant"}`}>
+        <Power size={compact ? 13 : 15} /> Paused
+      </span>
+      <span className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors duration-300 ${compact ? "h-7 w-[86px] text-[12px]" : "h-9 w-[120px] text-[13px]"} ${enabled ? "text-on-primary" : "text-on-surface-variant"}`}>
+        <span className={`rounded-full ${compact ? "w-1.5 h-1.5" : "w-2.5 h-2.5"} ${enabled ? "bg-on-primary animate-pulse" : "bg-current opacity-60"}`} />
+        Active
+      </span>
+    </div>
+  );
 
   const syncEngine = (mappings: Mapping[]) => {
     invoke("update_mappings", { mappings }).catch(()=>{});
@@ -229,31 +259,38 @@ export default function App() {
     syncEngine(profiles[active].mappings);
   }, [active]);
 
-  // Auto-start: load profiles and start engine (default paused - mappings inactive until user presses Activate)
+  // Auto-start: apply the launch preference, then load profiles and start engine
   useEffect(() => {
     const t = setTimeout(() => {
-      invoke<boolean>("get_engine_enabled").then(v=> setEnabled(v)).catch(()=>{});
-      try {
-        const saved = localStorage.getItem("lefty_profiles");
-        const savedActive = localStorage.getItem("lefty_active");
-        let curProfiles = profiles;
-        let curActive = active;
-        if (saved) {
-          try { curProfiles = JSON.parse(saved); } catch {}
+      if (launchedRef.current) return;
+      launchedRef.current = true;
+      let startActive = false;
+      try { startActive = localStorage.getItem("lefty_start_active") === "true"; } catch {}
+      setEnabled(startActive);
+      const launch = () => {
+        try {
+          const saved = localStorage.getItem("lefty_profiles");
+          const savedActive = localStorage.getItem("lefty_active");
+          let curProfiles = profiles;
+          let curActive = active;
+          if (saved) {
+            try { curProfiles = JSON.parse(saved); } catch {}
+          }
+          if (savedActive) curActive = savedActive;
+          const m = curProfiles[curActive]?.mappings || profiles[active]?.mappings || [];
+          invoke("update_mappings", {mappings: m}).then(()=> invoke("start_engine", {profile: curActive}).catch(()=>{})).catch(()=>{});
+        } catch {
+          invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
         }
-        if (savedActive) curActive = savedActive;
-        const m = curProfiles[curActive]?.mappings || profiles[active]?.mappings || [];
-        invoke("update_mappings", {mappings: m}).then(()=> invoke("start_engine", {profile: curActive}).catch(()=>{})).catch(()=>{});
-      } catch {
-        invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
-      }
+      };
+      invoke("set_engine_enabled", { enabled: startActive }).then(launch).catch(launch);
     }, 400);
     const id = setInterval(async () => {
       try {
         const state = await invoke<boolean>("get_engine_enabled");
         setEnabled(prev => prev !== state ? state : prev);
       } catch {}
-    }, 300);
+    }, 100);
     return () => { clearTimeout(t); clearInterval(id); };
   }, [profiles, active]);
 
@@ -301,34 +338,27 @@ export default function App() {
   return (
     <div className="h-screen bg-surface-dim text-on-surface flex flex-col overflow-hidden selection:bg-primary/20 relative font-sans antialiased">
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-tertiary/5 pointer-events-none" />
-      <header className="h-[68px] bg-surface-container border-b border-outline-variant flex items-center justify-between px-7 sticky top-0 z-10 shadow-m3-1">
+      <header className="px-5 pt-4 sticky top-0 z-10">
+        <div className="h-[72px] bg-surface-container border border-outline-variant rounded-[20px] flex items-center justify-between px-5 shadow-m3-1">
         <div className="flex items-center gap-4">
-          <div className="w-9 h-9 rounded-xl bg-primary-container grid place-items-center shadow-m3-1 overflow-hidden border border-outline-variant">
+          <div className="w-10 h-10 rounded-xl bg-primary-container grid place-items-center shadow-m3-1 overflow-hidden border border-outline-variant">
             <img src={laskIcon} alt="Lefty" className="w-full h-full object-cover" />
           </div>
           <div className="leading-none">
             <div className="flex items-baseline gap-2">
-              <h1 className="text-[17px] font-display font-semibold tracking-tight text-on-surface">Lefty</h1>
+              <h1 className="text-[18px] font-display font-semibold tracking-tight text-on-surface">Lefty</h1>
               <span className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">v2</span>
             </div>
             <p className="text-[11px] font-medium tracking-wide text-on-surface-variant mt-[2px]">By Sycho <span className="text-outline">·</span> Left-handed</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2.5 pl-3 pr-1 py-1 rounded-full bg-surface-container-high border border-outline-variant">
-            <div className={`w-2 h-2 rounded-full transition-colors duration-300 ${enabled ? "bg-primary" : "bg-outline"}`} />
-            <span className="text-[11px] font-medium tracking-wide text-on-surface pr-2">{enabled ? "ACTIVE" : "INACTIVE"}</span>
-            <button onClick={toggle} className={`h-7 px-4 rounded-full text-[12px] font-medium m3-pressable active:scale-95 transition-all duration-150 ${enabled ? "bg-surface-container-highest border border-outline text-on-surface hover:bg-surface-container-high" : "bg-primary text-on-primary hover:shadow-m3-1 hover:scale-[1.02]"}`}>
-              {enabled ? "Pause" : "Activate"}
-            </button>
-          </div>
-          <div className="sm:hidden flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full transition-colors duration-300 ${enabled ? "bg-primary" : "bg-outline"}`} />
-            <button onClick={toggle} className={`h-8 px-4 rounded-full text-[12px] font-medium m3-pressable active:scale-95 transition-all duration-150 ${enabled ? "bg-surface-container-high border border-outline text-on-surface" : "bg-primary text-on-primary"}`}>{enabled ? "Pause" : "Activate"}</button>
-          </div>
-          <button onClick={()=> { setSettingsTab("general"); setShowSettings(true); }} aria-label="Settings" className="w-9 h-9 rounded-full bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest grid place-items-center text-on-surface-variant hover:text-on-surface m3-pressable active:scale-90 transition-transform duration-150 hover:rotate-90">
-            <Settings size={16} />
+          <div className="hidden sm:block">{renderStatusSwitch(false)}</div>
+          <div className="sm:hidden">{renderStatusSwitch(true)}</div>
+          <button onClick={()=> { setSettingsTab("general"); setShowSettings(true); }} aria-label="Settings" className="w-11 h-11 rounded-full bg-surface-container-high border border-outline-variant hover:bg-surface-container-highest grid place-items-center text-on-surface-variant hover:text-on-surface m3-pressable active:scale-90 transition-transform duration-150 hover:rotate-90">
+            <Settings size={18} />
           </button>
+        </div>
         </div>
       </header>
 
@@ -362,35 +392,35 @@ export default function App() {
         </aside>
 
         <main className="col-span-12 lg:col-span-9 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
-          <div className="px-5 py-4 border-b border-outline-variant">
+          <div className="px-6 py-5 border-b border-outline-variant">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-[15px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={14} className="text-on-surface-variant"/> {prof.display_name}</h2>
-                <p className="text-[12px] text-on-surface-variant mt-1.5 leading-relaxed max-w-[520px]">{prof.description}</p>
+                <h2 className="text-[17px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={16} className="text-on-surface-variant"/> {prof.display_name}</h2>
+                <p className="text-[13px] text-on-surface-variant mt-1.5 leading-relaxed max-w-[560px]">{prof.description}</p>
               </div>
-              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-8 px-3.5 rounded-full bg-primary text-on-primary text-[12px] font-medium items-center gap-1.5 hover:opacity-90 transition-all duration-150 m3-pressable active:scale-[0.96] hover:scale-[1.02]"><Plus size={14}/> Add</button>
+              <button onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium items-center gap-1.5 hover:opacity-90 transition-all duration-150 m3-pressable active:scale-[0.96] hover:scale-[1.02]"><Plus size={15}/> Add</button>
             </div>
           </div>
-          <div className="px-5 py-2.5 flex items-center justify-between text-[10px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
+          <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
             <span>{prof.mappings.length} MAPPINGS</span><span className="font-normal tracking-wide text-outline">SOURCE → TARGET</span>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-1.5 bg-surface-container">
+          <div className="flex-1 min-h-0 overflow-auto p-4 space-y-2 bg-surface-container">
             {prof.mappings.length===0 ? (
-              <div className="py-16 text-center">
-                <div className="w-10 h-10 mx-auto rounded-xl bg-surface-container-high border border-outline-variant grid place-items-center text-outline"><Keyboard size={18}/></div>
-                <p className="text-[13px] font-medium text-on-surface mt-3">No mappings</p>
-                <p className="text-[12px] text-on-surface-variant">Add your first remap to start</p>
-                <button onClick={()=>setShowAdd(true)} className="mt-4 h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium m3-pressable active:scale-[0.96] transition-transform duration-150">Add mapping</button>
+              <div className="py-20 text-center">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-surface-container-high border border-outline-variant grid place-items-center text-outline"><Keyboard size={22}/></div>
+                <p className="text-[15px] font-medium text-on-surface mt-4">No mappings</p>
+                <p className="text-[13px] text-on-surface-variant mt-1">Add your first remap to start</p>
+                <button onClick={()=>setShowAdd(true)} className="mt-5 h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium m3-pressable active:scale-[0.96] transition-transform duration-150">Add mapping</button>
               </div>
             ) : prof.mappings.map(([s,d])=>(
-              <div key={s} className="h-[46px] bg-surface-container-high border border-outline-variant rounded-xl flex items-center px-3 gap-2.5">
-                <span className="px-3 py-1 rounded-full bg-surface-container-highest border border-outline-variant text-[11px] font-mono font-medium min-w-[64px] text-center text-on-surface">{s}</span>
-                <span className="w-6 h-6 rounded-full bg-primary text-on-primary grid place-items-center text-[10px] font-medium">→</span>
-                <span className="px-3 py-1 rounded-full bg-primary-container text-on-primary-container text-[11px] font-mono font-medium min-w-[64px] text-center border border-outline-variant">{d}</span>
-                <span className="hidden sm:block text-[11px] text-on-surface-variant ml-1">remap</span>
-                <div className="ml-auto flex items-center gap-1">
-                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-7 h-7 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container"><ArrowLeftRight size={11}/></button>
-                  <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-7 h-7 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-error-container hover:text-on-error-container hover:border-error transition-colors"><Trash2 size={11}/></button>
+              <div key={s} className="h-[58px] bg-surface-container-high border border-outline-variant rounded-2xl flex items-center px-4 gap-3">
+                <span className="px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[76px] text-center text-on-surface">{s}</span>
+                <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[14px] font-medium shadow-m3-1">→</span>
+                <span className="px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[76px] text-center border border-outline-variant">{d}</span>
+                <span className="hidden sm:block text-[12px] text-on-surface-variant ml-1">remap</span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container"><ArrowLeftRight size={14}/></button>
+                  <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-primary hover:text-on-primary hover:border-primary transition-colors"><Trash2 size={14}/></button>
                 </div>
               </div>
             ))}
@@ -402,27 +432,37 @@ export default function App() {
       </div>
       {(showAdd || closingAdd) && (
         <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 m3-backdrop ${closingAdd ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeAdd}>
-          <div className={`w-full max-w-[440px] bg-surface-container rounded-[28px] border border-outline-variant p-5 shadow-m3-3 m3-modal ${closingAdd ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
-            <h3 className="text-[14px] font-display font-semibold text-on-surface">Add mapping</h3>
-            <p className="text-[11px] text-on-surface-variant mt-1">Choose source and target</p>
-            {capturing && <p className="mt-3 text-[11px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-1.5 text-center">Capturing… press a key ({capturing})</p>}
-            <div className="grid grid-cols-2 gap-3 mt-4 items-start">
+          <div className={`w-full max-w-[540px] bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingAdd ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shadow-m3-1 shrink-0"><Plus size={18}/></span>
               <div>
-                <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE</label>
-                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} aria-invalid={!mappingValidation.canSave} className={`mt-1.5 w-full h-9 rounded-full bg-surface-container-high border text-[11px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${!mappingValidation.canSave ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
-                </select>
-                <button onClick={()=>setCapturing("src")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture source</button>
-              </div>
-              <div>
-                <label className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET</label>
-                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} className="mt-1.5 w-full h-9 rounded-full bg-surface-container-high border border-outline-variant text-[11px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary">
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
-                </select>
-                <button onClick={()=>setCapturing("dst")} className={`mt-2 w-full h-7 rounded-full text-[11px] font-medium border ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>Capture target</button>
+                <h3 className="text-[16px] font-display font-semibold text-on-surface leading-none">Add mapping</h3>
+                <p className="text-[11px] text-on-surface-variant mt-1.5">Pick the key you press and what it should type</p>
               </div>
             </div>
-            <div aria-live="polite" className="min-h-[30px] mt-3">
+            {capturing && <p className="mt-4 text-[12px] font-medium text-on-tertiary-container bg-tertiary-container border border-outline-variant rounded-full px-3 py-2 text-center animate-pulse">Capturing… press any key ({capturing === "src" ? "source" : "target"})</p>}
+            <div className="grid grid-cols-[1fr_auto_1fr] gap-3 mt-5 items-stretch">
+              <div className={`rounded-2xl border p-3.5 flex flex-col gap-2.5 transition-colors duration-200 ${capturing === "src" ? "bg-surface-container-high border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant"}`}>
+                <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE · YOU PRESS</span>
+                <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "src" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${srcKey.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "src" ? "?" : srcKey}</div>
+                <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} aria-label="Source key" aria-invalid={!mappingValidation.canSave} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${!mappingValidation.canSave ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
+                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                </select>
+                <button onClick={()=>setCapturing("src")} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
+              </div>
+              <div className="flex items-center">
+                <span className="w-9 h-9 rounded-full bg-primary text-on-primary grid place-items-center text-[15px] font-medium shadow-m3-1">→</span>
+              </div>
+              <div className={`rounded-2xl border p-3.5 flex flex-col gap-2.5 transition-colors duration-200 ${capturing === "dst" ? "bg-surface-container-high border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant"}`}>
+                <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET · IT TYPES</span>
+                <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "dst" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${dstKey.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "dst" ? "?" : dstKey}</div>
+                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} aria-label="Target key" aria-invalid={mappingValidation.conflict.kind === "self"} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${mappingValidation.conflict.kind === "self" ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
+                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                </select>
+                <button onClick={()=>setCapturing("dst")} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
+              </div>
+            </div>
+            <div aria-live="polite" className="min-h-[30px] mt-4">
               {mappingValidation.message && (
                 <p className="text-[11px] font-medium text-on-error-container bg-error-container/40 border border-error/40 rounded-xl px-3 py-2 flex items-center gap-2 animate-m3-fade-in">
                   <TriangleAlert size={13} className="flex-shrink-0" />
@@ -430,31 +470,26 @@ export default function App() {
                 </p>
               )}
             </div>
-            <div className="flex items-center justify-center gap-3 mt-3 p-3 rounded-[16px] bg-surface-container-high border border-outline-variant">
-              <span className="px-4 py-2 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono text-on-surface min-w-[72px] text-center shadow-sm">{srcKey}</span>
-              <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium shadow-m3-1">→</span>
-              <span className="px-4 py-2 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono border border-outline-variant min-w-[72px] text-center shadow-sm">{dstKey}</span>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={closeAdd} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[13px] font-medium shadow-sm m3-pressable active:scale-[0.97]">Cancel</button>
-              <button onClick={addMap} disabled={!mappingValidation.canSave} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.97] m3-pressable transition-all duration-150 hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100">Save mapping</button>
+            <div className="flex gap-3 mt-4">
+              <button onClick={closeAdd} className="flex-1 h-12 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[14px] font-medium shadow-sm m3-pressable active:scale-[0.97]">Cancel</button>
+              <button onClick={addMap} disabled={!mappingValidation.canSave} className="flex-1 h-12 rounded-full bg-primary text-on-primary text-[14px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.97] m3-pressable transition-all duration-150 hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100">Save mapping</button>
             </div>
           </div>
         </div>
       )}
       {(confirmDelete || closingDelete) && (
         <div className={`fixed inset-0 bg-scrim/70 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingDelete ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeDelete}>
-          <div className={`w-full max-w-[420px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 p-6 m3-modal ${closingDelete ? "animate-m3-scale-out" : "animate-m3-scale-in"}`} onClick={e=>e.stopPropagation()}>
+          <div className={`w-full max-w-[460px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 p-7 m3-modal ${closingDelete ? "animate-m3-scale-out" : "animate-m3-scale-in"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-start gap-4">
-              <span className="w-11 h-11 rounded-[14px] bg-error-container text-on-error-container grid place-items-center flex-shrink-0 shadow-m3-1 animate-m3-shake"><Trash2 size={20}/></span>
+              <span className="w-12 h-12 rounded-2xl bg-primary text-on-primary grid place-items-center flex-shrink-0 shadow-m3-1 animate-m3-shake"><Trash2 size={22}/></span>
               <div className="flex-1">
-                <h3 className="text-[16px] font-display font-medium text-on-surface leading-none">Are you sure to delete this keymap?</h3>
-                <p className="text-[12px] leading-relaxed text-on-surface-variant mt-2">This will permanently delete <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full text-on-surface">{confirmDelete} → {profiles[active].mappings.find(([s])=> s===confirmDelete)?.[1] || ""}</span> from <span className="font-medium text-on-surface">{prof.display_name}</span>. This action cannot be undone.</p>
+                <h3 className="text-[17px] font-display font-medium text-on-surface leading-snug">Are you sure to delete this keymap?</h3>
+                <p className="text-[13px] leading-relaxed text-on-surface-variant mt-2">This will permanently delete <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full text-on-surface">{confirmDelete} → {profiles[active].mappings.find(([s])=> s===confirmDelete)?.[1] || ""}</span> from <span className="font-medium text-on-surface">{prof.display_name}</span>. This action cannot be undone.</p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={closeDelete} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[13px] font-medium m3-pressable active:scale-[0.97]">Cancel</button>
-              <button onClick={()=> { if(confirmDelete) delMap(confirmDelete); closeDelete(); }} className="flex-1 h-11 rounded-full bg-error text-on-error text-[13px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.97] m3-pressable transition-all duration-150 hover:brightness-110">Delete</button>
+              <button onClick={closeDelete} className="flex-1 h-12 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[14px] font-medium m3-pressable active:scale-[0.97]">Cancel</button>
+              <button onClick={()=> { if(confirmDelete) delMap(confirmDelete); closeDelete(); }} className="flex-1 h-12 rounded-full bg-primary text-on-primary text-[14px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.97] m3-pressable transition-all duration-150 hover:scale-[1.01]">Delete</button>
             </div>
           </div>
         </div>
@@ -469,7 +504,7 @@ export default function App() {
                   <h3 className="text-[18px] font-display font-medium text-on-surface leading-none">Settings</h3>
                 </div>
               </div>
-              <button onClick={closeSettings} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-error-container hover:border-error hover:text-on-error-container grid place-items-center text-on-surface-variant transition-colors m3-pressable active:scale-90">✕</button>
+              <button onClick={closeSettings} className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant hover:bg-primary hover:border-primary hover:text-on-primary grid place-items-center text-on-surface-variant transition-colors m3-pressable active:scale-90">✕</button>
             </div>
             <div className="flex-1 min-h-0 flex flex-col sm:flex-row overflow-hidden">
               <nav className="sm:w-[188px] shrink-0 border-b sm:border-b-0 sm:border-r border-outline-variant bg-surface-container-high p-2.5 flex sm:flex-col flex-row gap-1.5 overflow-x-auto" aria-label="Settings sections">
@@ -495,10 +530,32 @@ export default function App() {
                       <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Power size={16}/></span>
                       <div className="flex-1">
                         <div className="text-[13px] font-medium text-on-surface">Launch at startup</div>
-                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Launch Lefty when Windows starts. Uses registry Run key, no services.</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Launch Lefty elevated at logon via Task Scheduler. No UAC prompt, no services.</div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={autostart} onChange={e=>{ const v=e.target.checked; setAutostart(v); invoke("set_autostart",{enabled:v}).catch(()=>{}); }} className="sr-only peer" />
+                        <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
+                      </label>
+                    </div>
+                    <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                      <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Minimize2 size={16}/></span>
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium text-on-surface">Start minimized</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Starts minimized in the tray.</div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={startMinimized} onChange={e=>{ const v=e.target.checked; setStartMinimized(v); invoke("set_start_minimized",{enabled:v}).catch(()=>{}); }} className="sr-only peer" />
+                        <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
+                      </label>
+                    </div>
+                    <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                      <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Play size={16}/></span>
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium text-on-surface">Start with mappings active</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Begin with remaps on every launch instead of paused.</div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={startActive} onChange={e=>{ const v=e.target.checked; setStartActive(v); try{localStorage.setItem("lefty_start_active",String(v));}catch{} }} className="sr-only peer" />
                         <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
                       </label>
                     </div>
@@ -535,7 +592,7 @@ export default function App() {
                   <div className="space-y-3 animate-m3-fade-in">
                     <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4">
                       <div className="flex items-start gap-3">
-                        <span className="w-9 h-9 rounded-[12px] bg-tertiary-container text-on-tertiary-container grid place-items-center flex-shrink-0"><Mouse size={16}/></span>
+                        <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Mouse size={16}/></span>
                         <div className="flex-1">
                           <div className="text-[13px] font-medium text-on-surface">Left-handed mouse — invert clicks</div>
                           <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Swap primary/secondary button with <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Restored on exit.</div>
@@ -548,7 +605,7 @@ export default function App() {
                     </div>
                     <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4">
                       <div className="flex items-start gap-3">
-                        <span className="w-9 h-9 rounded-[12px] bg-primary-container text-on-primary-container grid place-items-center flex-shrink-0"><KeyboardOff size={16}/></span>
+                        <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><KeyboardOff size={16}/></span>
                         <div className="flex-1">
                           <div className="text-[13px] font-medium text-on-surface">Global hotkey to pause</div>
                           <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Key to pause/resume remaps without closing Lefty. Default <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">F6</span>.</div>

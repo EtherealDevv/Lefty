@@ -14,10 +14,25 @@ use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, SetWindowsHookExW,
 
 mod keyboard_layout;
 
+/// Spawns console tools (taskkill/schtasks/reg) WITHOUT flashing a console
+/// window (CREATE_NO_WINDOW). A visible conhost flash on every Activate looked
+/// like "another app opening briefly".
+#[cfg(windows)]
+fn silent_command(prog: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut c = std::process::Command::new(prog);
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+#[cfg(not(windows))]
+fn silent_command(prog: &str) -> std::process::Command {
+    std::process::Command::new(prog)
+}
+
 #[derive(Clone)]
 struct EngineState(Arc<Mutex<Option<Child>>>);
 static CAPTURE_TX: OnceLock<Mutex<Option<mpsc::Sender<(u32, u32)>>>> = OnceLock::new();
-static ORIGINAL_SWAP_STATE: OnceLock<Mutex<Option<bool>>> = OnceLock::new();
 
 #[tauri::command]
 fn is_admin() -> bool {
@@ -151,21 +166,28 @@ fn update_mappings(mappings: Vec<(String, String)>) -> Result<String, String> {
 
 #[tauri::command]
 fn set_invert_clicks(enabled: bool) -> Result<String, String> {
-    let orig_mtx = ORIGINAL_SWAP_STATE.get_or_init(|| Mutex::new(None));
+    // Restaurar SIEMPRE al baseline real (un OFF anterior con Swap(false) a pelo
+    // rompía a quien ya usa Windows en modo zurdo).
+    let base = mouse_baseline_swapped();
     unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton;
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SYSTEM_METRICS_INDEX};
-        const SM_SWAPBUTTON: i32 = 23;
-        {
-            let mut guard = orig_mtx.lock().map_err(|e| e.to_string())?;
-            if guard.is_none() {
-                let cur = GetSystemMetrics(SYSTEM_METRICS_INDEX(SM_SWAPBUTTON)) != 0;
-                *guard = Some(cur);
-            }
-        }
-        SwapMouseButton(enabled);
+        SwapMouseButton(if enabled { true } else { base });
         Ok(format!("SwapMouseButton {}", enabled))
     }
+}
+
+/// Baseline real del botón primario: el ajuste del SO en el registro.
+/// SwapMouseButton solo cambia el estado en vivo, NUNCA toca el registro
+/// (verificado: con inversión impuesta el registro sigue en su valor),
+/// así que es inmune al envenenamiento que sufría leer el estado en vivo
+/// (una 2ª instancia o un kill previo lo encontraban ya invertido).
+/// Sin archivos: nada que limpiar ni migrar.
+fn mouse_baseline_swapped() -> bool {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey("Control Panel\\Mouse")
+        .and_then(|k| k.get_value::<String, _>("SwapMouseButtons"))
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -222,9 +244,38 @@ fn get_hotkey() -> Result<String, String> {
     Ok(fs::read_to_string(&path).unwrap_or_else(|_| "F6".to_string()).trim().to_uppercase())
 }
 
-fn get_task_name() -> Result<String, String> {
-    let user = std::env::var("USERNAME").map_err(|e| e.to_string())?;
-    Ok(format!("\\Lefty\\Autorun for {}", user))
+/// Tarea de autostart PowerToys-style: logon del usuario, token interactivo
+/// (sin contraseña), HIGHEST (sin UAC en cada arranque).
+const AUTOSTART_TASK_PATH: &str = "\\Lefty\\";
+const AUTOSTART_TASK_NAME: &str = "Lefty Autorun";
+
+/// Escapa un valor para interpolarlo dentro de "..." en un -Command de PowerShell.
+fn ps_dq_escape(s: &str) -> String {
+    s.replace('`', "``").replace('"', "`\"").replace('$', "`$")
+}
+
+fn ps_invoke(script: &str) -> Result<std::process::Output, String> {
+    silent_command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .output()
+        .map_err(|e| format!("powershell failed: {}", e))
+}
+
+fn legacy_autostart_cleanup() {
+    // Migración: la implementación anterior (schtasks) usaba otro nombre de tarea.
+    if let Ok(user) = std::env::var("USERNAME") {
+        let old = format!("Autorun for {}", user.replace('"', ""));
+        let script = format!(
+            "Unregister-ScheduledTask -TaskName \"{}\" -TaskPath \"\\Lefty\\\" -Confirm:$false -ErrorAction SilentlyContinue",
+            old
+        );
+        let _ = ps_invoke(&script);
+    }
+    // Legados de Run key con otros nombres.
+    let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    for v in ["Lefty_fix", "lefty-tauri", "Lefty-tauri"] {
+        let _ = silent_command("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", v, "/f"]).output();
+    }
 }
 fn get_exe_for_autostart() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -242,71 +293,50 @@ fn get_exe_for_autostart() -> Result<PathBuf, String> {
 
 #[tauri::command]
 fn set_autostart(enabled: bool) -> Result<String, String> {
-    // PowerToys-style Task Scheduler autostart — robust, shows as Lefty in Task Manager Startup
-    let task_name = get_task_name()?;
     let exe = get_exe_for_autostart()?;
     let exe_str = exe.to_string_lossy().to_string();
-    // Clean legacy registry entries that showed Lefty_fix
+    legacy_autostart_cleanup();
+    // Limpiar también un posible valor Run "Lefty" para no arrancar dos veces.
     let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty_fix", "/f"]).output();
-    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "lefty-tauri", "/f"]).output();
-    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty-tauri", "/f"]).output();
-    let _ = std::process::Command::new("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/f"]).output();
-    let status = if enabled {
-        // PowerToys uses \PowerToys\Autorun for %USERNAME% with ONLOGON trigger, delay 3s, interactive token
-        // We do same for \Lefty\Autorun for %USERNAME%
+    let _ = silent_command("reg").args(["delete", &format!("HKCU\\{}", key_path), "/v", "Lefty", "/f"]).output();
+    if enabled {
+        // schtasks.exe no sirve aquí: no crea la carpeta \Lefty\ y exige
+        // contraseña con /RU. PowerShell sí: crea la carpeta, LogonType
+        // Interactive no pide contraseña y HIGHEST evita el UAC en cada logon.
         let username = std::env::var("USERNAME").map_err(|e| e.to_string())?;
         let userdomain = std::env::var("USERDOMAIN").unwrap_or_else(|_| ".".to_string());
-        let full_user = format!("{}\\{}", userdomain, username);
-        // Use schtasks to create task — PowerToys uses COM Task Scheduler, schtasks is equivalent and simpler
-        std::process::Command::new("schtasks")
-            .args([
-                "/Create",
-                "/TN", &task_name,
-                "/TR", &format!("\"{}\"", exe_str),
-                "/SC", "ONLOGON",
-                "/RU", &full_user,
-                "/RL", "HIGHEST",
-                "/DELAY", "0000:03",
-                "/F",
-            ])
-            .output()
-            .map_err(|e| e.to_string())?
+        let account = format!("{}\\{}", userdomain, username);
+        let script = format!(
+            "$e=\"{exe}\";$a=New-ScheduledTaskAction -Execute $e;$t=New-ScheduledTaskTrigger -AtLogOn -User \"{acc}\";$p=New-ScheduledTaskPrincipal -UserId \"{acc}\" -LogonType Interactive -RunLevel Highest;$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable;Register-ScheduledTask -TaskName \"{name}\" -TaskPath \"{path}\" -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null",
+            exe = ps_dq_escape(&exe_str),
+            acc = ps_dq_escape(&account),
+            name = AUTOSTART_TASK_NAME,
+            path = AUTOSTART_TASK_PATH,
+        );
+        let out = ps_invoke(&script)?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("No se pudo crear la tarea: {}", err.chars().take(300).collect::<String>()));
+        }
     } else {
-        std::process::Command::new("schtasks")
-            .args(["/Delete", "/TN", &task_name, "/F"])
-            .output()
-            .map_err(|e| e.to_string())?
-    };
-    if !status.status.success() {
-        return Err(format!("reg failed: {:?}", status));
+        let script = format!(
+            "Unregister-ScheduledTask -TaskName \"{}\" -TaskPath \"{}\" -Confirm:$false -ErrorAction SilentlyContinue",
+            AUTOSTART_TASK_NAME, AUTOSTART_TASK_PATH
+        );
+        let _ = ps_invoke(&script);
     }
     Ok(format!("autostart {}", enabled))
 }
 
 #[tauri::command]
 fn get_autostart() -> Result<bool, String> {
-    // PowerToys-style: check Task Scheduler task existence and enabled
-    let task_name = get_task_name()?;
-    let out = std::process::Command::new("schtasks")
-        .args(["/Query", "/TN", &task_name])
-        .output()
-        .map_err(|e| e.to_string())?;
-    // schtasks returns 0 if task exists, even if disabled; we check output for "Ready" or "Running" vs "Disabled"
-    // Simpler: if query succeeds, check if task is not disabled via /Query /V /FO CSV
-    if !out.status.success() {
-        return Ok(false);
-    }
-    let out_v = std::process::Command::new("schtasks")
-        .args(["/Query", "/TN", &task_name, "/V", "/FO", "CSV"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&out_v.stdout);
-    // If task exists but is disabled, it will contain "Disabled"
-    if stdout.to_lowercase().contains("disabled") {
-        return Ok(false);
-    }
-    Ok(true)
+    let script = format!(
+        "$t=Get-ScheduledTask -TaskName \"{}\" -TaskPath \"{}\" -ErrorAction SilentlyContinue;if($t){{$t.State}}else{{'Missing'}}",
+        AUTOSTART_TASK_NAME, AUTOSTART_TASK_PATH
+    );
+    let out = ps_invoke(&script)?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    Ok(s.contains("Ready") || s.contains("Running"))
 }
 
 #[tauri::command]
@@ -330,6 +360,34 @@ fn get_hide_to_tray() -> Result<bool, String> {
         PathBuf::from("hide_tray.txt")
     };
     Ok(fs::read_to_string(&path).map(|s| s.trim() == "1").unwrap_or(true))
+}
+
+/// Arrancar minimizado en tray (solo aplica al inicio con autostart).
+fn start_minimized_path() -> PathBuf {
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        let _ = fs::create_dir_all(&dir);
+        dir.join("start_minimized.txt")
+    } else {
+        PathBuf::from("start_minimized.txt")
+    }
+}
+
+fn start_minimized_enabled() -> bool {
+    fs::read_to_string(start_minimized_path())
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_start_minimized(enabled: bool) -> Result<String, String> {
+    fs::write(start_minimized_path(), if enabled { b"1" } else { b"0" }).map_err(|e| e.to_string())?;
+    Ok(format!("start_minimized {}", enabled))
+}
+
+#[tauri::command]
+fn get_start_minimized() -> Result<bool, String> {
+    Ok(start_minimized_enabled())
 }
 
 #[tauri::command]
@@ -471,6 +529,15 @@ fn capture_key() -> Result<String, String> {
     Ok(vk_to_name(vk_enc))
 }
 
+/// ¿Hay algún lefty_engine.exe vivo? (para reap con espera, sin sleeps ciegos)
+fn engine_process_running() -> bool {
+    silent_command("tasklist")
+        .args(["/FI", "IMAGENAME eq lefty_engine.exe", "/FO", "CSV", "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("lefty_engine.exe"))
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandle) -> Result<String, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -486,8 +553,18 @@ fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandl
     // Sin hijo rastreado puede quedar un huérfano/zombi de una sesión previa
     // (builds viejos sin salida limpia). Reaped seguro: nuestra imagen es otra,
     // aquí no hay suicidio posible como en el singleton del engine.
-    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Pero taskkill es async: hay que ESPERAR a que muera antes de spawnear,
+    // o el nuevo ve el mutex aún ocupado y cede (cero engines). Sin sleeps
+    // ciegos: solo si tasklist ve algo, y espera acotada a que desaparezca.
+    if engine_process_running() {
+        let _ = silent_command("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+        for _ in 0..40 {
+            if !engine_process_running() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
     let exe = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         PathBuf::from(manifest_dir).join("../../engine_native/target/release/lefty_engine.exe")
     } else {
@@ -560,7 +637,7 @@ fn kill_existing_instances() {
                     let exe_name = String::from_utf16_lossy(&entry.szExeFile[..]).trim_matches('\0').to_lowercase();
                     let pid = entry.th32ProcessID;
                     if pid != current_pid && (exe_name == "lefty.exe" || exe_name == "lefty_engine.exe") {
-                        let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
+                        let _ = silent_command("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
                     }
                     if Process32NextW(h, &mut entry).is_err() {
                         break;
@@ -619,8 +696,8 @@ fn check_single_instance() -> bool {
                         }
                     }
                     // Reintentar matar si sigue vivo
-                    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "Lefty.exe"]).output();
-                    let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                    let _ = silent_command("taskkill").args(["/F", "/IM", "Lefty.exe"]).output();
+                    let _ = silent_command("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
                 }
                 // Si no se liberó, intentar igual y continuar
                 let name2: Vec<u16> = "Global\\LeftySingleton\0".encode_utf16().collect();
@@ -639,9 +716,9 @@ fn check_single_instance() -> bool {
 }
 
 fn main() {
-    if !check_single_instance() {
-        std::process::exit(0);
-    }
+    // 1) Elevar PRIMERO: el reemplazo de instancias (taskkill) falla con
+    // Access Denied si una instancia sin elevar intenta matar a la elevada,
+    // dejando dos Lefty vivos y clicks invertidos "para siempre".
     #[cfg(not(debug_assertions))]
     {
         if !is_admin() {
@@ -658,6 +735,17 @@ fn main() {
             }
             std::process::exit(0);
         }
+    }
+    // 2) Singleton DESPUÉS (ya elevados: el kill sí funciona). Limpieza de
+    // archivos legacy del baseline anterior basado en ficheros (inertes desde
+    // que el baseline se lee del registro).
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        let _ = fs::remove_file(dir.join("mouse_orig.txt"));
+        let _ = fs::remove_file(dir.join("mouse_imposed.txt"));
+    }
+    if !check_single_instance() {
+        std::process::exit(0);
     }
     let engine_state = EngineState(Arc::new(Mutex::new(None)));
     tauri::Builder::default()
@@ -696,6 +784,13 @@ fn main() {
                     }
                 })
                 .build(app);
+            // La ventana nace oculta (tauri.conf visible:false) para no flashear;
+            // se muestra salvo que el usuario pidiera arrancar en tray.
+            if !start_minimized_enabled() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
             Ok(())
         })
         .on_window_event(move |window, event| {
@@ -711,18 +806,15 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                if let Some(mtx) = ORIGINAL_SWAP_STATE.get() {
-                    if let Ok(guard) = mtx.lock() {
-                        if let Some(orig) = *guard {
-                            unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton(orig); }
-                        }
-                    }
-                }
+                // Restaurar clicks al baseline real del registro (nunca al estado
+                // en memoria: una 2ª instancia lo habría capturado ya invertido).
+                let base = mouse_baseline_swapped();
+                unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton(base); }
                 if let Some(state) = app.try_state::<EngineState>() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(mut child) = guard.take() {
@@ -732,7 +824,7 @@ fn main() {
                     }
                 }
                 // Fallback: asegura que no quede lefty_engine huérfano (si fue lanzado y no está en EngineState)
-                let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                let _ = silent_command("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
                 // También limpiar mutex para single instance
                 let _ = std::fs::remove_file(std::env::temp_dir().join("lefty_single_instance.lock"));
             }
@@ -752,7 +844,7 @@ fn main() {
                                 }
                             }
                         }
-                        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                        let _ = silent_command("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
                     }
                 }
             }
