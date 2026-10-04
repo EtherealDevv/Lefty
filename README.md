@@ -21,6 +21,30 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 - Very low latency native Rust engine (verify live in Settings → About)
 - Clean dark UI
 
+## Screenshots
+
+### Main window
+
+![Main dashboard](screenshots/main-dashboard.png)
+
+### Mappings
+
+| Add mapping | Delete mapping |
+|---|---|
+| ![Add mapping](screenshots/add-mapping.png) | ![Delete mapping](screenshots/delete-mapping.png) |
+
+### Settings
+
+| General | Appearance |
+|---|---|
+| ![Settings general](screenshots/settings-general.png) | ![Settings appearance](screenshots/settings-apparence.png) |
+
+| Input | Profiles |
+|---|---|
+| ![Settings input](screenshots/settings-input.png) | ![Settings profiles](screenshots/settings-profiles.png) |
+
+![Settings about](screenshots/settings-about.png)
+
 ## Install
 
 ```bash
