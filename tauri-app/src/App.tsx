@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Keyboard, Plus, Trash2, ArrowLeftRight, Zap, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play } from "lucide-react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Gauge } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import laskIcon from "./LASK.png";
@@ -104,6 +104,8 @@ export default function App() {
   // El arranque (fichero + spawn del engine) se ejecuta UNA sola vez por
   // sesión: los re-runs del efecto por profiles/active solo reponen el poll.
   const launchedRef = useRef(false);
+  // Telemetría de latencia del engine (About).
+  const [latStats, setLatStats] = useState<{ avg_us: number; max_us: number; events: number; ts_ms: number } | null>(null);
   useEffect(() => {
     if (firstEnabledSync.current) {
       firstEnabledSync.current = false;
@@ -111,6 +113,20 @@ export default function App() {
     }
     playToggleSound(enabled);
   }, [enabled]);
+
+  // Latencia del engine: poll 1s solo con Settings abierto en About.
+  useEffect(() => {
+    if (!showSettings || settingsTab !== "about") return;
+    let stop = false;
+    const poll = () => {
+      invoke<{ avg_us: number; max_us: number; events: number; ts_ms: number }>("get_latency_stats")
+        .then((v) => { if (!stop) setLatStats(v); })
+        .catch(() => { if (!stop) setLatStats(null); });
+    };
+    poll();
+    const id = setInterval(poll, 1000);
+    return () => { stop = true; clearInterval(id); };
+  }, [showSettings, settingsTab]);
 
   const closeAdd = () => {
     setClosingAdd(true);
@@ -380,15 +396,6 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className="p-3 border-t border-outline-variant bg-surface-container-high/50">
-            <div className="rounded-xl bg-surface-container-high border border-outline-variant p-3 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-primary text-on-primary grid place-items-center"><Zap size={14} /></div>
-              <div>
-                <div className="text-[11px] font-medium text-on-surface leading-none">Native Engine</div>
-                <div className="text-[11px] text-on-surface-variant mt-1">Rust • 0.02ms • WH_KEYBOARD_LL</div>
-              </div>
-            </div>
-          </div>
         </aside>
 
         <main className="col-span-12 lg:col-span-9 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
@@ -634,7 +641,7 @@ export default function App() {
                   <div className="space-y-3 animate-m3-fade-in">
                     <div className="rounded-xl bg-primary-container/20 border border-outline-variant p-3 flex gap-3">
                       <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center flex-shrink-0"><Lightbulb size={14}/></span>
-                      <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">How it works:</span> Lefty uses <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">WH_KEYBOARD_LL</span> + <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SendInput</span> in Rust (0.02ms). Activate profile before launching game and use <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">{hotkey}</span> to pause.</p>
+                      <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">How it works:</span> Lefty uses <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">WH_KEYBOARD_LL</span> + <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SendInput</span> in Rust with low latency. Activate profile before launching game and use <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">{hotkey}</span> to pause.</p>
                     </div>
                     <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
                       <span className="w-9 h-9 rounded-[12px] bg-primary-container text-on-primary-container grid place-items-center flex-shrink-0 overflow-hidden border border-outline-variant">
@@ -643,6 +650,20 @@ export default function App() {
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-medium text-on-surface flex items-center gap-2">Lefty <span className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">v2</span></div>
                         <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Tauri v2 · React · Rust native engine. By Sycho — left-handed layouts.</div>
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                      <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Gauge size={16}/></span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium text-on-surface">Engine latency</div>
+                        <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Hook → injection, measured in-engine (last second).</div>
+                        <div className="mt-2 font-mono text-[12px] text-on-surface">
+                          {latStats && Date.now() - latStats.ts_ms < 3000 && latStats.events > 0 ? (
+                            <>avg <span className="font-medium">{(latStats.avg_us / 1000).toFixed(3)}ms</span> · max <span className="font-medium">{(latStats.max_us / 1000).toFixed(3)}ms</span> · <span className="text-on-surface-variant">{latStats.events} keys</span></>
+                          ) : (
+                            <span className="text-on-surface-variant">idle — press a mapped key</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

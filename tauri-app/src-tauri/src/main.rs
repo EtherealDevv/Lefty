@@ -395,6 +395,29 @@ fn get_f6_state() -> Result<bool, String> {
     get_engine_enabled()
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct LatencyStats {
+    avg_us: u64,
+    max_us: u64,
+    events: u64,
+    ts_ms: u64,
+}
+
+/// Latencia hook→inyección medida dentro del engine (ventana de 1 s).
+/// Sin engine o sin teclas recientes devuelve ceros (la UI lo muestra como idle).
+#[tauri::command]
+fn get_latency_stats() -> Result<LatencyStats, String> {
+    let path = if let Ok(appdata) = std::env::var("APPDATA") {
+        PathBuf::from(appdata).join("Lefty").join("latency_stats.json")
+    } else {
+        PathBuf::from("latency_stats.json")
+    };
+    match fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
+        Err(_) => Ok(LatencyStats { avg_us: 0, max_us: 0, events: 0, ts_ms: 0 }),
+    }
+}
+
 #[tauri::command]
 fn get_debug_info() -> Result<String, String> {
     let path = if let Ok(appdata) = std::env::var("APPDATA") {
@@ -806,7 +829,7 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {

@@ -5,7 +5,7 @@
 Remap any key for left-handed gaming. Low latency, native Rust engine.
 
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat)
-![Latency](https://img.shields.io/badge/Latency-0.02ms-success?style=flat)
+![Latency](https://img.shields.io/badge/Latency-low-success?style=flat)
 ![Rust](https://img.shields.io/badge/Rust-Tauri-orange?style=flat)
 
 ## What is it?
@@ -18,7 +18,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 - Interface sounds: distinct chimes for activate vs pause (Settings → General)
 - Tabbed Settings: General, Appearance, Input, Profiles, About
 - Works in any game (low-level hook)
-- Very low latency (0.02ms Rust, 0.5ms with Interception driver)
+- Very low latency native Rust engine (verify live in Settings → About)
 - Clean dark UI
 
 ## Install
@@ -58,7 +58,9 @@ cd Lefty
 | Method | Latency |
 |--------|---------|
 | Registry | 0ms (reboot, not dynamic) |
-| **Lefty** | **~0.02ms** |
+| **Lefty** | **low latency*** |
+
+*Verify it yourself live in the app: Settings → About → Engine latency.
 | AutoHotkey | 5-15ms |
 
 ## Structure

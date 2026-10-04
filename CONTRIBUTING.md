@@ -5,7 +5,7 @@ Thanks for helping left-handed gamers!
 ## Build
 
 ```bash
-# Engine (Rust, 0.02ms)
+# Engine (Rust, low-latency)
 cd engine_native
 cargo build --release
 

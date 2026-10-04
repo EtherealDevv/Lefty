@@ -9,6 +9,9 @@
 - Add Mapping validation: duplicate sources and self-maps blocked inline
 - Profile Import/Export to `.json` with merge or replace modes
 - Interface sounds: synthesized activate/pause chimes
+- Engine latency pack: batched SendInput, 1 ms timer resolution, no power
+  throttling, plus live per-second latency readout in Settings → About
+- Latency claims replaced by "low latency", verifiable live in-app
 
 ## 1.1.0 — 2026-09-02
 - low-level port (WH_KEYBOARD_LL, SendInput, wScan, SINGLEKEY_FLAG)

@@ -32,7 +32,7 @@ Parent PID: `lefty_engine.exe --parent-pid 1234 --mappings C:\path\engine_mappin
 
 ## Why Rust vs C#
 
-- `C#` requiere `.NET` GC + JIT, `Rust` 0 GC, `~0.02ms` idéntico a `C++` Lefty
+- `C#` requiere `.NET` GC + JIT, `Rust` 0 GC, baja latencia idéntico a `C++` Lefty
 - Binario `Rust` ` --release` no necesita runtime, igual que `Lefty
 
 ## Test

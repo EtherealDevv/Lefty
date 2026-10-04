@@ -32,6 +32,23 @@ fn update_numpad_with_shift(vk: &mut u32, is_key_down: bool, state: &State) {
 }
 
 #[inline(always)]
+fn batch_push_suppress(inputs: &mut [INPUT; 2], count: &mut usize, w_vk: u16, w_scan: u16, flags: u32) {
+    inputs[*count] = INPUT {
+        r#type: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_KEYBOARD,
+        Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+            ki: windows::Win32::UI::Input::KeyboardAndMouse::KEYBDINPUT {
+                wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(w_vk),
+                wScan: w_scan,
+                dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(flags),
+                time: 0,
+                dwExtraInfo: crate::helpers::KEYBOARDMANAGER_SUPPRESS_FLAG,
+            },
+        },
+    };
+    *count += 1;
+}
+
+#[inline(always)]
 pub fn handle_single_key_remap(
     vk: &mut u32,
     is_key_down: bool,
@@ -60,7 +77,7 @@ pub fn handle_single_key_remap(
 
     let target = filter_artificial_keys(remapped);
 
-    let mut inputs: [INPUT; 1] = unsafe { std::mem::zeroed() };
+    let mut inputs: [INPUT; 2] = unsafe { std::mem::zeroed() };
     let mut count: usize = 0;
 
     if is_key_up {
@@ -84,29 +101,17 @@ pub fn handle_single_key_remap(
         };
         count = 1;
     } else {
+        // Un solo SendInput con hasta 2 INPUTs (suppress del modificador origen
+        // + tecla destino): la mitad de syscalls que dos envíos separados.
+        // batch[0] = suppress (si aplica), batch[n] = destino.
         if is_modifier_key(vk_code) && !is_modifier_key(target) && target != 0x14 && vk_code != 0x5B && vk_code != 0x5C && vk_code != crate::state::VK_WIN_BOTH {
-            let mut suppress: [INPUT; 1] = unsafe { std::mem::zeroed() };
             let w_vk_s = filter_artificial_keys(vk_code) as u16;
             let mut flags_s = KEYEVENTF_KEYUP.0;
             if is_extended_key(vk_code) {
                 flags_s |= windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_EXTENDEDKEY.0;
             }
             let w_scan_s = crate::state::vk_to_scan_cached(vk_code);
-            suppress[0] = INPUT {
-                r#type: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: windows::Win32::UI::Input::KeyboardAndMouse::KEYBDINPUT {
-                        wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(w_vk_s),
-                        wScan: w_scan_s,
-                        dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(flags_s),
-                        time: 0,
-                        dwExtraInfo: crate::helpers::KEYBOARDMANAGER_SUPPRESS_FLAG,
-                    },
-                },
-            };
-            unsafe {
-                let _ = SendInput(&suppress, std::mem::size_of::<INPUT>() as i32);
-            }
+            batch_push_suppress(&mut inputs, &mut count, w_vk_s, w_scan_s, flags_s);
         }
         let w_vk = filter_artificial_keys(target) as u16;
         let mut dw_flags = 0;
@@ -114,7 +119,7 @@ pub fn handle_single_key_remap(
             dw_flags |= windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_EXTENDEDKEY.0;
         }
         let w_scan = crate::state::vk_to_scan_cached(target);
-        inputs[0] = INPUT {
+        inputs[count] = INPUT {
             r#type: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: windows::Win32::UI::Input::KeyboardAndMouse::KEYBDINPUT {
@@ -126,7 +131,7 @@ pub fn handle_single_key_remap(
                 },
             },
         };
-        count = 1;
+        count += 1;
     }
 
     let sent = unsafe { SendInput(&inputs[..count], std::mem::size_of::<INPUT>() as i32) };

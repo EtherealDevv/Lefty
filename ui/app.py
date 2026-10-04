@@ -13,7 +13,19 @@ from core.keys import ALL_KEY_NAMES, VK_MAP, vk_name
 from core.storage import load_config, save_config, load_profiles, save_profiles
 from core.profile import BUILTIN_PROFILES, profile_to_vk_map, add_mapping, remove_mapping, validate_mapping
 from engine.remapper import get_remapper
-from engine.interception_backend import get_interception_status, is_interception_available, get_interception_remapper
+# Interception removed - native only
+def is_interception_available():
+    return False
+def get_interception_status():
+    return {"available": False, "latency": "N/A", "install_url": "", "instructions": ""}
+class _DummyInterception:
+    def set_mappings(self, *a, **kw): pass
+    def start(self): return False
+    def stop(self): pass
+    def is_running(self): return False
+    def set_mouse_invert(self, *a, **kw): pass
+def get_interception_remapper():
+    return _DummyInterception()
 from .theme import CTK_THEME, M3_DARK, M3_EXPRESSIVE, SHAPES, FONTS_EXPRESSIVE
 from .components import MappingRowExpressive
 
@@ -276,7 +288,7 @@ class LeftyApp(ctk.CTk):
         self.latency_label.pack(anchor="w", padx=14, pady=(12, 2))
         ctk.CTkLabel(status_card, text="Hook WH_KEYBOARD_LL", font=ctk.CTkFont(family="Roboto Medium", size=11, weight="bold"),
                      text_color=CTK_THEME["on_surface_variant"]).pack(anchor="w", padx=14)
-        ctk.CTkLabel(status_card, text="Rust nativo • Lefty
+        ctk.CTkLabel(status_card, text="Rust nativo • Lefty Engine • baja latencia",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=M3_EXPRESSIVE["tertiary"],
                      justify="left").pack(anchor="w", padx=14, pady=(2, 12))
 
@@ -306,7 +318,7 @@ class LeftyApp(ctk.CTk):
                      text_color=CTK_THEME["on_surface"]).pack(anchor="w", padx=14, pady=(10, 4))
         ctk.CTkLabel(engine_card, text="Rust nativo • WH_KEYBOARD_LL", font=ctk.CTkFont(family="Roboto Black", size=11),
                      text_color=CTK_THEME["primary"]).pack(anchor="w", padx=14)
-        ctk.CTkLabel(engine_card, text="0.02ms • Lefty
+        ctk.CTkLabel(engine_card, text="Baja latencia • Lefty Engine • Rust nativo",
                      text_color=M3_EXPRESSIVE["tertiary"]).pack(anchor="w", padx=14, pady=(0, 10))
 
         # Click inversion — zurdos (mouse)
@@ -349,7 +361,7 @@ class LeftyApp(ctk.CTk):
         gaming_card.pack(fill="x", padx=12, pady=6)
         ctk.CTkLabel(gaming_card, text="⚡ Gaming • Always optimized", font=ctk.CTkFont(family="Roboto Black", size=11),
                      text_color=M3_EXPRESSIVE["success"]).pack(anchor="w", padx=14, pady=(8, 2))
-        ctk.CTkLabel(gaming_card, text="Native Rust engine • 0.02ms • Lefty
+        ctk.CTkLabel(gaming_card, text="Native Rust engine • baja latencia • Lefty",
                      font=ctk.CTkFont(size=9, weight="bold"), text_color=CTK_THEME["on_surface_variant"], justify="left").pack(anchor="w", padx=14, pady=(0, 8))
 
         # Export / Import expressive — pill 28
@@ -637,7 +649,7 @@ class LeftyApp(ctk.CTk):
                     return
             else:
                 if self.config_data.get("latency_mode") == "ultra" and not is_interception_available():
-                    print("[Lefty] Ultra no disponible, usando Rust LL ~0.02ms")
+                    print("[Lefty] Ultra no disponible, usando Rust LL de baja latencia")
             self.remapper.set_mappings(vk_map)
             ok = self.remapper.start()
             if not ok:

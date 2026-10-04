@@ -5,8 +5,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -29,6 +29,33 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 static MAIN_DONE: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEY_VK: AtomicU32 = AtomicU32::new(0x75);
+// Telemetría de latencia hook→inyección (solo remapeos): QPC + acumuladores
+// lock-free. Overhead por tecla <0.1µs. Un hilo la vuelca a JSON cada segundo.
+static LAT_QPF: AtomicU64 = AtomicU64::new(0);
+static LAT_SUM_US: AtomicU64 = AtomicU64::new(0);
+static LAT_MAX_US: AtomicU32 = AtomicU32::new(0);
+static LAT_N: AtomicU64 = AtomicU64::new(0);
+
+#[inline(always)]
+fn qpc_now() -> u64 {
+    unsafe {
+        let mut t: i64 = 0;
+        windows::Win32::System::Performance::QueryPerformanceCounter(&mut t);
+        t as u64
+    }
+}
+
+#[inline(always)]
+fn latency_record(dt_ticks: u64) {
+    let qpf = LAT_QPF.load(Ordering::Relaxed);
+    if qpf == 0 {
+        return;
+    }
+    let us = dt_ticks.saturating_mul(1_000_000) / qpf;
+    LAT_SUM_US.fetch_add(us, Ordering::Relaxed);
+    LAT_N.fetch_add(1, Ordering::Relaxed);
+    LAT_MAX_US.fetch_max(us.min(u32::MAX as u64) as u32, Ordering::Relaxed);
+}
 
 #[inline(always)]
 fn set_mappings(m: HashMap<u32, u32>) {
@@ -83,9 +110,11 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     let is_key_down = w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize;
 
     let state = state::global_state();
+    let t0 = qpc_now();
     let result = keyboard_event_handlers::handle_single_key_remap(&mut vk, is_key_down, extra, state);
 
     if result.is_some() {
+        latency_record(qpc_now().wrapping_sub(t0));
         return LRESULT(1);
     }
 
@@ -118,6 +147,13 @@ fn load(p: &Path) -> Option<HashMap<u32, u32>> {
         }
     }
     Some(o)
+}
+
+fn latency_path() -> PathBuf {
+    if let Ok(a) = env::var("APPDATA") {
+        return PathBuf::from(a).join("Lefty").join("latency_stats.json");
+    }
+    PathBuf::from("latency_stats.json")
 }
 
 fn parent_pid_from_args() -> Option<u32> {
@@ -188,7 +224,43 @@ fn main() {
     unsafe {
         let _ = SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+        // QPC para la telemetría de latencia.
+        let mut f: i64 = 0;
+        let _ = windows::Win32::System::Performance::QueryPerformanceFrequency(&mut f);
+        LAT_QPF.store(f as u64, Ordering::Relaxed);
+        // Resolución del timer del sistema a 1ms: wakeups consistentes del pump.
+        windows::Win32::Media::timeBeginPeriod(1);
+        // Opt-out de power throttling: Windows no aparca el engine en ahorro.
+        {
+            use windows::Win32::System::Threading::{PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetProcessInformation};
+            let mut st = PROCESS_POWER_THROTTLING_STATE {
+                Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                StateMask: 0,
+            };
+            let _ = SetProcessInformation(
+                GetCurrentProcess(),
+                ProcessPowerThrottling,
+                &mut st as *mut _ as *mut std::ffi::c_void,
+                std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+            );
+        }
     }
+    // Vuelca avg/max/eventos del último segundo para la UI (About → latencia).
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(Duration::from_millis(1000));
+            let n = LAT_N.swap(0, Ordering::Relaxed);
+            let sum = LAT_SUM_US.swap(0, Ordering::Relaxed);
+            let max = LAT_MAX_US.swap(0, Ordering::Relaxed);
+            let avg = if n > 0 { sum / n } else { 0 };
+            let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let _ = fs::write(latency_path(), format!("{{\"avg_us\":{avg},\"max_us\":{max},\"events\":{n},\"ts_ms\":{ts}}}"));
+            if !RUNNING.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+    });
 
     let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook), HINSTANCE(std::ptr::null_mut()), 0) }
         .unwrap();
@@ -319,6 +391,7 @@ fn main() {
             DispatchMessageW(&msg);
         }
         MAIN_DONE.store(true, Ordering::Relaxed);
+        windows::Win32::Media::timeEndPeriod(1);
         let _ = UnhookWindowsHookEx(G_HOOK);
     }
 }
