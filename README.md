@@ -25,25 +25,25 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 
 ### Main window
 
-![Main dashboard](screenshots/main-dashboard.png)
+![Main dashboard](assets/screenshots/main-dashboard.png)
 
 ### Mappings
 
 | Add mapping | Delete mapping |
 |---|---|
-| ![Add mapping](screenshots/add-mapping.png) | ![Delete mapping](screenshots/delete-mapping.png) |
+| ![Add mapping](assets/screenshots/add-mapping.png) | ![Delete mapping](assets/screenshots/delete-mapping.png) |
 
 ### Settings
 
 | General | Appearance |
 |---|---|
-| ![Settings general](screenshots/settings-general.png) | ![Settings appearance](screenshots/settings-apparence.png) |
+| ![Settings general](assets/screenshots/settings-general.png) | ![Settings appearance](assets/screenshots/settings-apparence.png) |
 
 | Input | Profiles |
 |---|---|
-| ![Settings input](screenshots/settings-input.png) | ![Settings profiles](screenshots/settings-profiles.png) |
+| ![Settings input](assets/screenshots/settings-input.png) | ![Settings profiles](assets/screenshots/settings-profiles.png) |
 
-![Settings about](screenshots/settings-about.png)
+![Settings about](assets/screenshots/settings-about.png)
 
 ## Install
 
