@@ -80,6 +80,10 @@ Lefty/
 - **Stuck key**: Pause and resume.
 - **High delay**: Close other hooks (AutoHotkey).
 
+## Acknowledgments
+
+- Remapping architecture inspired by [Microsoft PowerToys Keyboard Manager](https://github.com/microsoft/PowerToys) (low-level hook + `SendInput` design, Task Scheduler autostart pattern) — reimplemented from scratch in Rust with a zero-GC hot path, batched injection and live latency telemetry for lower, measurable latency.
+
 ## License
 
 MIT — Made for left-handed gamers.
