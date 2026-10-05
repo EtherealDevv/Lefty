@@ -92,11 +92,10 @@ cd Lefty
 
 ```
 Lefty/
-├── core/       # keys, profiles
-├── engine/     # remapper (Rust + Python fallback)
-├── engine_native/ # Rust engine
-├── tauri-app/  # Rust + React UI
-└── dist/       # Lefty.exe + installers
+├── engine_native/ # Rust engine (hook + SendInput + telemetry)
+├── tauri-app/     # Tauri v2 + React UI
+├── assets/        # banner + screenshots
+└── dist/          # Lefty.exe + installers
 ```
 
 ## Troubleshooting
