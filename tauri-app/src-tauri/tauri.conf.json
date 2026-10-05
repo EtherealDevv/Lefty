@@ -17,8 +17,7 @@
         "resizable": true,
         "decorations": true,
         "maximized": true,
-        "center": true,
-        "visible": false
+        "center": true
       }
     ],
     "security": {
@@ -37,5 +36,5 @@
   },
   "identifier": "com.lefty.app",
   "productName": "Lefty",
-  "version": "1.3.0"
+  "version": "1.4.0"
 }

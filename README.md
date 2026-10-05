@@ -54,7 +54,7 @@ cd Lefty
 # Run
 .\dist\Lefty.exe
 # Or install
-.\dist\Lefty_1.3.0_x64-setup.exe
+.\dist\Lefty_1.4.0_x64-setup.exe
 ```
 
 > Run as **Administrator** for games that run elevated.
@@ -63,11 +63,11 @@ cd Lefty
 
 | Profile | Mapping |
 |---------|---------|
-| **Sycho — OÑLK** | `O→W, K→A, L→S, Ñ→D` + mirrored |
-| **Left-handed IJKL** | `W→I, A→J, S→K, D→L` |
-| **Arrow Keys** | `W→UP, A→LEFT...` |
+| **Left-handed IJKL** | `I→W, J→A, K→S, L→D` + mirrored cluster |
+| **Arrow Keys** | `↑→W, ←→A, ↓→S, →→D` + cluster |
+| **Numpad 8456** | `8→W, 4→A, 5→S, 6→D` + digits |
+| **OKL; Mirror** | `O→W, K→A, L→S, ;→D` + mirror |
 | **Custom** | Empty, make your own |
-| **Disabled** | No remap |
 
 ## Usage
 

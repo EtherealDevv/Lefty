@@ -1,6 +1,15 @@
 # Changelog
 
-## 1.3.0 — 2026-10-03
+## 1.4.0 — 2026-10-05
+- Complete researched profiles: IJKL (22 binds), Arrows (17), Numpad 8456 (20),
+  OKL; Mirror (23); one-time factory migration for existing users
+- Fixed silent key-name resolution (frontend aliases + case-insensitive match,
+  covered by Rust tests)
+- Profile CRUD: create on Save, rename, duplicate, delete, reorder, Lucide icons
+- Settings sidebar, accent themes, interface sounds, share-code import/export
+- Engine hardening: no zombie/self-kill states, orphan reap, hidden consoles
+- Instant toggle, deterministic startup, launch options, auto-switch per game
+- Live engine latency readout, gamer-focus mode, update checker, guided tour
 - Engine: fixed hotkey dead after manual Activate (singleton self-kill via
   taskkill + zombie parent-watcher missing WM_QUIT); `start_engine` now reaps
   orphans and respawns dead children

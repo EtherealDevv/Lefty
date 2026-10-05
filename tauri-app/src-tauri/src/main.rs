@@ -122,6 +122,9 @@ fn name_to_vk(name: &str) -> Option<u32> {
     }
     // OEM fallbacks for LATAM 105 distinct
     // but keep hard fallback for characters not in layout enumeration (like Ñ etc if layout is US)
+    // + alias exactos para los nombres del frontend (FALLBACK_ALL_KEYS), que no
+    // siempre coinciden con el layout ("UP" vs "Up", "NUM8" vs "NumPad 8"...).
+    // Sin esto, esos mapeos se descartaban en silencio.
     match trimmed_upper {
         "Ñ" | "OEM_1" => Some(0xBA),
         "'" | "OEM_PLUS" => Some(0xBB),
@@ -137,7 +140,50 @@ fn name_to_vk(name: &str) -> Option<u32> {
         "OEM_8" => Some(0xDF),
         "<" | "OEM_102" => Some(0xE2),
         "DISABLED" => Some(0x100),
-        _ => None,
+        "SHIFT" => Some(0x10),
+        "LSHIFT" => Some(0xA0),
+        "RSHIFT" => Some(0xA1),
+        "CTRL" => Some(0x11),
+        "LCTRL" => Some(0xA2),
+        "RCTRL" => Some(0xA3),
+        "ALT" => Some(0x12),
+        "LALT" => Some(0xA4),
+        "RALT" => Some(0xA5),
+        "LWIN" => Some(0x5B),
+        "RWIN" => Some(0x5C),
+        "CAPSLOCK" => Some(0x14),
+        "PAGEUP" => Some(0x21),
+        "PAGEDOWN" => Some(0x22),
+        "NUMLOCK" => Some(0x90),
+        "SCROLLLOCK" => Some(0x91),
+        "PRINTSCREEN" => Some(0x2C),
+        "NUM0" => Some(0x60),
+        "NUM1" => Some(0x61),
+        "NUM2" => Some(0x62),
+        "NUM3" => Some(0x63),
+        "NUM4" => Some(0x64),
+        "NUM5" => Some(0x65),
+        "NUM6" => Some(0x66),
+        "NUM7" => Some(0x67),
+        "NUM8" => Some(0x68),
+        "NUM9" => Some(0x69),
+        "NUM*" => Some(0x6A),
+        "NUM+" => Some(0x6B),
+        "NUM-" => Some(0x6D),
+        "NUM." => Some(0x6E),
+        "NUM/" => Some(0x6F),
+        "NUMENTER" => Some(0x0D),
+        _ => {
+            // Último recurso: comparar insensible a mayúsculas contra la lista
+            // real del layout ("UP"→"Up"). Solo si nada exacto coincidió antes.
+            let lower = n.to_lowercase();
+            for (code, key_name) in keyboard_layout::get_key_name_list(false) {
+                if key_name.to_lowercase() == lower {
+                    return Some(code);
+                }
+            }
+            None
+        }
     }
 }
 
@@ -215,6 +261,108 @@ fn set_engine_enabled(enabled: bool) -> Result<String, String> {
     };
     fs::write(&path, if enabled { b"1" } else { b"0" }).map_err(|e| e.to_string())?;
     Ok(format!("enabled {}", enabled))
+}
+
+/// Foco gamer bajo demanda: lo llama el frontend en CADA transición de
+/// `enabled` (botón, F6 o arranque), porque F6 conmuta solo en el engine y
+/// jamás pasa por `set_engine_enabled`. Best-effort: nunca falla.
+#[tauri::command]
+fn apply_gamer_focus(enabled: bool) -> Result<String, String> {
+    if enabled {
+        a11y_suppress();
+    } else {
+        a11y_restore();
+    }
+    Ok(format!("gamer_focus {}", enabled))
+}
+
+/// Supresión gamer de avisos de accesibilidad (Shift×5, Shift 8s, NumLock×5).
+/// Solo apaga HOTKEYS (aviso/sonido/confirmación); el estado de las funciones
+/// no se toca. Originales en a11y_backup.json (crash-safe: si ya existe backup
+/// es de una muerte sucia anterior y SE CONSERVA).
+fn a11y_backup_path() -> PathBuf {
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        let _ = fs::create_dir_all(&dir);
+        dir.join("a11y_backup.json")
+    } else {
+        PathBuf::from("a11y_backup.json")
+    }
+}
+
+// Bits Win32 estables en FILTERKEYS/TOGGLEKEYS (u32), idénticos a SKF_ 4/8/16.
+const A11Y_HOTKEYACTIVE: u32 = 0x0004;
+const A11Y_CONFIRMHOTKEY: u32 = 0x0008;
+const A11Y_HOTKEYSOUND: u32 = 0x0010;
+
+fn a11y_suppress() {
+    use windows::Win32::UI::Accessibility::{FILTERKEYS, STICKYKEYS, TOGGLEKEYS, SKF_CONFIRMHOTKEY, SKF_HOTKEYACTIVE, SKF_HOTKEYSOUND};
+    use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETFILTERKEYS, SPI_GETSTICKYKEYS, SPI_GETTOGGLEKEYS, SPI_SETFILTERKEYS, SPI_SETSTICKYKEYS, SPI_SETTOGGLEKEYS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
+    unsafe {
+        let mut sk: STICKYKEYS = std::mem::zeroed();
+        sk.cbSize = std::mem::size_of::<STICKYKEYS>() as u32;
+        let mut fk: FILTERKEYS = std::mem::zeroed();
+        fk.cbSize = std::mem::size_of::<FILTERKEYS>() as u32;
+        let mut tk: TOGGLEKEYS = std::mem::zeroed();
+        tk.cbSize = std::mem::size_of::<TOGGLEKEYS>() as u32;
+        let ok_sk = SystemParametersInfoW(SPI_GETSTICKYKEYS, sk.cbSize, Some(&mut sk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok();
+        let ok_fk = SystemParametersInfoW(SPI_GETFILTERKEYS, fk.cbSize, Some(&mut fk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok();
+        let ok_tk = SystemParametersInfoW(SPI_GETTOGGLEKEYS, tk.cbSize, Some(&mut tk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok();
+        if !(ok_sk && ok_fk && ok_tk) {
+            return;
+        }
+        // Guardar originales solo la primera vez (si hay backup, es el bueno).
+        if fs::read_to_string(a11y_backup_path()).is_err() {
+            let backup = serde_json::json!({
+                "sticky": sk.dwFlags.0,
+                "filter": fk.dwFlags,
+                "filter_timings": [fk.iWaitMSec, fk.iDelayMSec, fk.iRepeatMSec, fk.iBounceMSec],
+                "toggle": tk.dwFlags,
+            });
+            let _ = fs::write(a11y_backup_path(), backup.to_string());
+        }
+        sk.dwFlags &= !(SKF_HOTKEYACTIVE | SKF_CONFIRMHOTKEY | SKF_HOTKEYSOUND);
+        fk.dwFlags &= !(A11Y_HOTKEYACTIVE | A11Y_CONFIRMHOTKEY | A11Y_HOTKEYSOUND);
+        tk.dwFlags &= !(A11Y_HOTKEYACTIVE | A11Y_CONFIRMHOTKEY | A11Y_HOTKEYSOUND);
+        let _ = SystemParametersInfoW(SPI_SETSTICKYKEYS, sk.cbSize, Some(&mut sk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        let _ = SystemParametersInfoW(SPI_SETFILTERKEYS, fk.cbSize, Some(&mut fk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        let _ = SystemParametersInfoW(SPI_SETTOGGLEKEYS, tk.cbSize, Some(&mut tk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+    }
+}
+
+fn a11y_restore() {
+    use windows::Win32::UI::Accessibility::{FILTERKEYS, STICKYKEYS, TOGGLEKEYS};
+    use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_SETFILTERKEYS, SPI_SETSTICKYKEYS, SPI_SETTOGGLEKEYS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
+    let raw = match fs::read_to_string(a11y_backup_path()) {
+        Ok(s) => s,
+        Err(_) => return, // nunca suprimimos: no tocar nada
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    unsafe {
+        let mut sk: STICKYKEYS = std::mem::zeroed();
+        sk.cbSize = std::mem::size_of::<STICKYKEYS>() as u32;
+        sk.dwFlags = windows::Win32::UI::Accessibility::STICKYKEYS_FLAGS(v.get("sticky").and_then(|x| x.as_u64()).unwrap_or(0) as u32);
+        let mut fk: FILTERKEYS = std::mem::zeroed();
+        fk.cbSize = std::mem::size_of::<FILTERKEYS>() as u32;
+        fk.dwFlags = v.get("filter").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+        if let Some(t) = v.get("filter_timings").and_then(|x| x.as_array()) {
+            let n = |i: usize| t.get(i).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            fk.iWaitMSec = n(0);
+            fk.iDelayMSec = n(1);
+            fk.iRepeatMSec = n(2);
+            fk.iBounceMSec = n(3);
+        }
+        let mut tk: TOGGLEKEYS = std::mem::zeroed();
+        tk.cbSize = std::mem::size_of::<TOGGLEKEYS>() as u32;
+        tk.dwFlags = v.get("toggle").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+        let _ = SystemParametersInfoW(SPI_SETSTICKYKEYS, sk.cbSize, Some(&mut sk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        let _ = SystemParametersInfoW(SPI_SETFILTERKEYS, fk.cbSize, Some(&mut fk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        let _ = SystemParametersInfoW(SPI_SETTOGGLEKEYS, tk.cbSize, Some(&mut tk as *mut _ as *mut std::ffi::c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+    }
+    let _ = fs::remove_file(a11y_backup_path());
 }
 
 #[tauri::command]
@@ -405,6 +553,73 @@ struct LatencyStats {
 
 /// Latencia hook→inyección medida dentro del engine (ventana de 1 s).
 /// Sin engine o sin teclas recientes devuelve ceros (la UI lo muestra como idle).
+/// App en primer plano (exe + título) para el auto-switch de perfiles.
+/// Solo lectura, sin enforcement: el engine siempre aplica el perfil activo.
+#[derive(serde::Serialize)]
+struct ForegroundApp {
+    exe: String,
+    title: String,
+}
+
+#[tauri::command]
+fn get_foreground_app() -> Result<ForegroundApp, String> {
+    unsafe {
+        use windows::Win32::Foundation::{CloseHandle, HMODULE};
+        use windows::Win32::System::ProcessStatus::K32GetModuleFileNameExW;
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return Ok(ForegroundApp { exe: String::new(), title: String::new() });
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32));
+        let mut exe = String::new();
+        if pid != 0 {
+            if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                let mut buf = [0u16; 260];
+                let len = K32GetModuleFileNameExW(h, HMODULE(std::ptr::null_mut()), &mut buf);
+                if len > 0 {
+                    let full = String::from_utf16_lossy(&buf[..len as usize]);
+                    if let Some(n) = full.rsplit(['\\', '/']).next() {
+                        exe = n.to_string();
+                    }
+                }
+                let _ = CloseHandle(h);
+            }
+        }
+        let mut tbuf = [0u16; 512];
+        let tlen = GetWindowTextW(hwnd, &mut tbuf);
+        let title = String::from_utf16_lossy(&tbuf[..tlen as usize]);
+        Ok(ForegroundApp { exe, title })
+    }
+}
+
+/// Abre una URL en el navegador por defecto vía explorer.exe (que corre sin
+/// elevar aunque la app vaya como admin; abrir el navegador directo desde un
+/// proceso elevado falla en silencio). Solo http(s), sin shell de por medio.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<String, String> {
+    let u = url.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return Err("solo URLs http(s)".to_string());
+    }
+    if u.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'') {
+        return Err("URL inválida".to_string());
+    }
+    silent_command("explorer.exe")
+        .arg(u)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok("opened".into())
+}
+
+/// Versión de la app (para el update checker del frontend).
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[tauri::command]
 fn get_latency_stats() -> Result<LatencyStats, String> {
     let path = if let Ok(appdata) = std::env::var("APPDATA") {
@@ -807,11 +1022,11 @@ fn main() {
                     }
                 })
                 .build(app);
-            // La ventana nace oculta (tauri.conf visible:false) para no flashear;
-            // se muestra salvo que el usuario pidiera arrancar en tray.
-            if !start_minimized_enabled() {
+            // Start minimized: ocultar tras crear. La ventana nace visible
+            // como en los builds viejos (visible:false rompía el maximized).
+            if start_minimized_enabled() {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
+                    let _ = window.hide();
                 }
             }
             Ok(())
@@ -829,7 +1044,7 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, get_app_version, open_external_url])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
@@ -838,6 +1053,8 @@ fn main() {
                 // en memoria: una 2ª instancia lo habría capturado ya invertido).
                 let base = mouse_baseline_swapped();
                 unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton(base); }
+                // Restaurar avisos de accesibilidad si se suprimieron.
+                a11y_restore();
                 if let Some(state) = app.try_state::<EngineState>() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(mut child) = guard.take() {
@@ -872,4 +1089,62 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod mapping_tests {
+    use super::name_to_vk;
+
+    /// Nombres independientes del layout: SIEMPRE deben resolver (letras vía
+    /// enum con caps, resto vía alias/overrides). Si falla alguno, perfiles
+    /// con ese nombre se descartan en silencio.
+    #[test]
+    fn frontend_names_resolve() {
+        let mut names: Vec<String> = Vec::new();
+        for c in 'A'..='Z' {
+            names.push(c.to_string());
+        }
+        for c in '0'..='9' {
+            names.push(c.to_string());
+        }
+        for i in 1..=12 {
+            names.push(format!("F{}", i));
+        }
+        names.extend(
+            [
+                "ESC", "TAB", "CAPSLOCK", "SHIFT", "LSHIFT", "RSHIFT", "CTRL", "LCTRL",
+                "RCTRL", "ALT", "LALT", "RALT", "LWIN", "RWIN", "SPACE", "ENTER",
+                "BACKSPACE", "UP", "DOWN", "LEFT", "RIGHT", "INSERT", "DELETE",
+                "HOME", "END", "PAGEUP", "PAGEDOWN", "NUMLOCK", "SCROLLLOCK",
+                "PRINTSCREEN", "PAUSE", "SLEEP", "DISABLED",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
+        for i in 0..=9 {
+            names.push(format!("NUM{}", i));
+        }
+        names.extend(
+            ["NUM*", "NUM+", "NUM-", "NUM.", "NUM/", "NUMENTER"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        let mut missing = Vec::new();
+        for n in &names {
+            if name_to_vk(n).is_none() {
+                missing.push(n.clone());
+            }
+        }
+        assert!(missing.is_empty(), "sin resolver: {:?}", missing);
+    }
+
+    /// OEM dependientes del layout: al menos UNA variante debe resolver
+    /// (";" en US, "Ñ" en LATAM) para que los companions cubran el perfil.
+    #[test]
+    fn oem_companions_cover() {
+        let semi = name_to_vk(";").is_some() || name_to_vk("Ñ").is_some();
+        assert!(semi, "ni ';' ni 'Ñ' resuelven en este layout");
+        assert!(name_to_vk("[").is_some(), "'[' sin resolver");
+        assert!(name_to_vk("´").is_some(), "'´' sin resolver");
+    }
 }

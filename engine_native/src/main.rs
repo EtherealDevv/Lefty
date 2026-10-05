@@ -338,6 +338,7 @@ fn main() {
     // Tid del hilo principal: el watcher debe postear WM_QUIT AQUÍ (GetMessageW vive
     // en este hilo; postear al tid del watcher —como antes— no despierta a nadie).
     let main_tid = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+
     if let Some(pid) = parent_pid_from_args() {
         std::thread::spawn(move || {
             use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};

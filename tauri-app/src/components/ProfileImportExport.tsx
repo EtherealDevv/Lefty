@@ -1,10 +1,9 @@
-import { useRef, useState } from "react";
-import { Download, Upload, Loader2, FileJson } from "lucide-react";
+import { useState } from "react";
+import { Loader2, FileJson, Share2 } from "lucide-react";
 import {
-  exportProfilesToFile,
-  parseProfilesFile,
   applyImportedMerge,
   applyImportedReplace,
+  decodeShareCode,
   getLocalProfiles,
   type ProfilesMap,
 } from "../lib/profilesIO";
@@ -15,65 +14,17 @@ type Props = {
 };
 
 export default function ProfileImportExport({ onProfilesChanged }: Props) {
-  const [busy, setBusy] = useState<null | "export" | "import">(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [mergeMode, setMergeMode] = useState<"merge" | "replace">("merge");
+  const [shareCode, setShareCode] = useState("");
+  const [busyShare, setBusyShare] = useState(false);
   const [localCount, setLocalCount] = useState(
     () => Object.keys(getLocalProfiles()).length
   );
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const flash = (kind: "ok" | "err", text: string) => {
     setMsg({ kind, text });
     window.setTimeout(() => setMsg((m) => (m?.text === text ? null : m)), 6000);
-  };
-
-  const handleExport = () => {
-    setBusy("export");
-    setMsg(null);
-    try {
-      const filename = exportProfilesToFile();
-      flash("ok", `Exported ${localCount} profile(s) → ${filename}`);
-    } catch (e) {
-      flash("err", e instanceof Error ? e.message : "Export failed.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (mergeMode === "replace") {
-      if (
-        !window.confirm(
-          "Replace ALL local profiles with the imported file? This cannot be undone."
-        )
-      )
-        return;
-    }
-    setBusy("import");
-    setMsg(null);
-    try {
-      const imported = await parseProfilesFile(file);
-      const applied =
-        mergeMode === "merge"
-          ? applyImportedMerge(imported)
-          : applyImportedReplace(imported);
-      setLocalCount(Object.keys(applied.profiles).length);
-      onProfilesChanged?.(applied.profiles, applied.active);
-      const n = Object.keys(imported).length;
-      flash(
-        "ok",
-        mergeMode === "merge"
-          ? `Imported & merged ✓ (${n} profile(s) from file)`
-          : `Replaced from file ✓ (${n} profile(s))`
-      );
-    } catch (e) {
-      flash("err", e instanceof Error ? e.message : "Import failed.");
-    } finally {
-      setBusy(null);
-      if (fileRef.current) fileRef.current.value = "";
-    }
   };
 
   return (
@@ -84,42 +35,12 @@ export default function ProfileImportExport({ onProfilesChanged }: Props) {
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-medium text-on-surface">
-            Import / Export profiles
-          </div>
-          <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">
-            Save your layouts to a <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full">.json</span> file
-            to back them up or move them to another PC. {localCount} profile(s) saved locally.
+            Import profile code
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mt-4">
-        <button
-          onClick={handleExport}
-          disabled={busy !== null || localCount === 0}
-          className="h-10 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center justify-center gap-1.5 hover:opacity-90 disabled:opacity-60 m3-pressable active:scale-[0.98]"
-        >
-          {busy === "export" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {busy === "export" ? "Exporting…" : "Export to file"}
-        </button>
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={busy !== null}
-          className="h-10 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-surface-container-high disabled:opacity-60 m3-pressable active:scale-[0.98]"
-        >
-          {busy === "import" ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-          {busy === "import" ? "Importing…" : "Import from file"}
-        </button>
-      </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        className="hidden"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
-      />
-
-      <div className="flex items-center gap-2 text-[11px] text-on-surface-variant mt-3">
+      <div className="flex items-center gap-2 text-[11px] text-on-surface-variant mt-4">
         <span>On import:</span>
         <label className="inline-flex items-center gap-1.5 cursor-pointer">
           <input
@@ -141,6 +62,50 @@ export default function ProfileImportExport({ onProfilesChanged }: Props) {
           />
           Replace (overwrite)
         </label>
+      </div>
+
+      <div className="mt-3">
+        <div className="text-[11px] font-medium text-on-surface">Paste a share code</div>
+        <textarea
+          value={shareCode}
+          onChange={(e) => setShareCode(e.target.value)}
+          rows={2}
+          spellCheck={false}
+          placeholder="Paste share code (LFT…)"
+          aria-label="Share code"
+          className="mt-1.5 w-full rounded-xl bg-surface-container-highest border border-outline-variant text-[11px] font-mono px-3 py-2 text-on-surface focus:outline-none focus:border-primary transition-colors resize-none"
+        />
+        <button
+          onClick={async () => {
+            if (!shareCode.trim() || busyShare) return;
+            if (
+              mergeMode === "replace" &&
+              !window.confirm("Replace ALL local profiles with this share code? This cannot be undone.")
+            )
+              return;
+            setBusyShare(true);
+            setMsg(null);
+            try {
+              const decoded = decodeShareCode(shareCode);
+              const single: ProfilesMap = { [decoded.id]: decoded.profile };
+              const applied =
+                mergeMode === "merge" ? applyImportedMerge(single) : applyImportedReplace(single);
+              setLocalCount(Object.keys(applied.profiles).length);
+              onProfilesChanged?.(applied.profiles, applied.active);
+              setShareCode("");
+              flash("ok", `Imported "${decoded.profile.display_name}" from share code ✓`);
+            } catch (e) {
+              flash("err", e instanceof Error ? e.message : "Invalid share code.");
+            } finally {
+              setBusyShare(false);
+            }
+          }}
+          disabled={!shareCode.trim() || busyShare}
+          className="mt-2 w-full h-9 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium flex items-center justify-center gap-1.5 hover:border-primary disabled:opacity-60 m3-pressable active:scale-[0.98]"
+        >
+          {busyShare ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
+          {busyShare ? "Importing…" : "Import share code"}
+        </button>
       </div>
 
       {msg && (
