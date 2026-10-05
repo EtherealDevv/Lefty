@@ -12,11 +12,16 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 ## What is it?
 
 - **WASD → IJKL** (or arrows, numpad) for left-hand movement
-- Map any key to any other: `W→I`, `Q→U`, `Caps→Ctrl`, `Win→Disabled`
+- Map any key to any other: `I→W`, `Q→U`, `Caps→Ctrl`, `Win→Disabled`
+- Profiles you can create, rename, duplicate, reorder and delete (Lucide icons)
+- Per-game auto-switch: jump to a profile when its app is focused
 - Add-mapping validation: duplicate sources and self-maps are blocked inline
 - Accent Color themes: 10 presets + custom picker (Settings → Appearance)
-- Profile Import/Export to `.json` with merge or replace modes
+- Share profiles with compact codes (`⋯ → Share`), import by pasting
 - Interface sounds: distinct chimes for activate vs pause (Settings → General)
+- Gaming focus: Sticky/Filter key popups stay silent while active
+- Launch options: autostart, start minimized, start active
+- Update checker + guided tour included
 - Tabbed Settings: General, Appearance, Input, Profiles, About
 - Works in any game (low-level hook)
 - Very low latency native Rust engine (verify live in Settings → About)
@@ -67,16 +72,17 @@ cd Lefty
 | **Arrow Keys** | `↑→W, ←→A, ↓→S, →→D` + cluster |
 | **Numpad 8456** | `8→W, 4→A, 5→S, 6→D` + digits |
 | **OKL; Mirror** | `O→W, K→A, L→S, ;→D` + mirror |
-| **Custom** | Empty, make your own |
+
+Create your own with `+` (rename, icon, auto-switch and reorder from `⋯`).
 
 ## Usage
 
 1. Pick a profile on the left
-2. **Add** or **Capture** a mapping (`W` → `I`, duplicates rejected)
+2. **Add** or **Capture** a mapping (`I` → `W`)
 3. **Activate**
 4. Play (activate before launching the game)
 5. **Pause** to restore, `F6` to toggle, close to tray
-6. Back up via Settings → Profiles → Export, restore via Import
+6. Share via `⋯ → Share` on any profile, import by pasting the code in Settings → Profiles
 
 ## Latency
 
@@ -84,9 +90,9 @@ cd Lefty
 |--------|---------|
 | Registry | 0ms (reboot, not dynamic) |
 | **Lefty** | **low latency*** |
+| AutoHotkey | 5-15ms |
 
 *Verify it yourself live in the app: Settings → About → Engine latency.
-| AutoHotkey | 5-15ms |
 
 ## Structure
 
