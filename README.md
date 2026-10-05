@@ -7,6 +7,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat)
 ![Latency](https://img.shields.io/badge/Latency-low-success?style=flat)
 ![Rust](https://img.shields.io/badge/Rust-Tauri-orange?style=flat)
+![Downloads](https://img.shields.io/github/downloads/EtherealDevv/Lefty/total?style=flat)
 
 ## What is it?
 
