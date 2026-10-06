@@ -10,6 +10,7 @@ import AccentColorSection from "./components/AccentColorSection";
 import { PROFILE_ICONS, ProfileGlyph, DEFAULT_PROFILE_ICON, migrateLegacyIcon } from "./lib/profileIcons";
 import { useAccent, applyAccent, resolveAccent, normalizeProfileAccent, adjustForContrast, ACCENT_PRESETS, contrastOn } from "./theme/accent";
 import GuidedTour from "./components/GuidedTour";
+import { COMBO_MODS, isComboTarget, joinComboTarget } from "./lib/comboTarget";
 import { useMappingValidation } from "./lib/useMappingValidation";
 import { isSoundEnabled, setSoundEnabled, playToggleSound, unlockAudio } from "./lib/toggleSound";
 import { encodeShareCode, type Profile, type Mapping, type ProfilesMap } from "./lib/profilesIO";
@@ -31,7 +32,9 @@ const FALLBACK_ALL_KEYS = [
   // Numpad 0→9
   "NUM0","NUM1","NUM2","NUM3","NUM4","NUM5","NUM6","NUM7","NUM8","NUM9","NUM*","NUM+","NUM-","NUM.","NUM/","NUMENTER",
   // Media / Browser
-  "VOLUME_MUTE","VOLUME_DOWN","VOLUME_UP","MEDIA_NEXT","MEDIA_PREV","MEDIA_STOP","MEDIA_PLAY","LAUNCH_MAIL","LAUNCH_MEDIA","BROWSER_BACK","BROWSER_FORWARD","BROWSER_REFRESH","BROWSER_STOP","BROWSER_SEARCH","BROWSER_FAVORITES","BROWSER_HOME","SLEEP","DISABLED"
+  "VOLUME_MUTE","VOLUME_DOWN","VOLUME_UP","MEDIA_NEXT","MEDIA_PREV","MEDIA_STOP","MEDIA_PLAY","LAUNCH_MAIL","LAUNCH_MEDIA","BROWSER_BACK","BROWSER_FORWARD","BROWSER_REFRESH","BROWSER_STOP","BROWSER_SEARCH","BROWSER_FAVORITES","BROWSER_HOME","SLEEP","DISABLED",
+  // Mouse side buttons (source only, capture with a click)
+  "MOUSE_X1","MOUSE_X2"
 ];
 
 const BUILTIN: ProfilesMap = {
@@ -263,9 +266,9 @@ export default function App() {
       setShowOnboard(true);
     }
   };
-  // El tour abre el editor en los pasos 3-5 y lo cierra al salir o retroceder.
+  // El tour abre el editor en los pasos del Add y lo cierra al salir o retroceder.
   const handleTourStep = useCallback((s: number) => {
-    if (s >= 3 && s <= 5) {
+    if (s >= 3 && s <= 6) {
       setClosingAdd(false);
       setShowAdd(true);
     } else {
@@ -433,6 +436,23 @@ export default function App() {
     setTimeout(() => { setConfirmDelete(null); setClosingDelete(false); }, 320);
   };
 
+  // Esc cierra de arriba hacia abajo (tour, browser, deletes, add, edit, settings).
+  // Sin deps: se re-suscribe cada render para leer estado fresco.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showOnboard) { finishTour(); return; }
+      if (confirmDelete) { closeDelete(); return; }
+      if (confirmProfile) { closeProfileModal(); return; }
+      if (showBrowser) { setShowBrowser(false); return; }
+      if (showAdd) { closeAdd(); return; }
+      if (creatingProfile || editProfileId) { closeEditProfile(); return; }
+      if (showSettings) { closeSettings(); return; }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   useEffect(() => {
     invoke<boolean>("is_admin").then(setIsAdmin).catch(()=>{});
     invoke<[number, string][]>("get_key_name_list").then(list => {
@@ -442,6 +462,8 @@ export default function App() {
         const hide = new Set(["F13","F14","F15","F16","F17","F18","F19","F20","F21","F22","F23","F24","Execute","Help","Select","Print","Apps","Sleep","Separator","Clear","CrSel","ExSel","Ereof","Play","Zoom","Noname","Pa1","OemClear","Attn","NoName","Hangeul","Hanja","Junja","Final","Hanja","Convert","NonConvert","Accept","ModeChange"]);
         names = names.filter(n => !hide.has(n));
         if (!names.includes("Ñ") && FALLBACK_ALL_KEYS.includes("Ñ")) names.push("Ñ");
+        if (!names.includes("MOUSE_X1")) names.push("MOUSE_X1");
+        if (!names.includes("MOUSE_X2")) names.push("MOUSE_X2");
         if (!names.includes("'") && FALLBACK_ALL_KEYS.includes("'")) names.push("'");
         if (!names.includes("´") && FALLBACK_ALL_KEYS.includes("´")) names.push("´");
         if (!names.includes("`") && FALLBACK_ALL_KEYS.includes("`")) names.push("`");
@@ -658,8 +680,11 @@ export default function App() {
     if (showFilter) filterRef.current?.focus();
     else setMapFilter("");
   }, [showFilter]);
-  // Validación en tiempo real del modal Add contra el perfil activo
-  const mappingValidation = useMappingValidation(srcKey, dstKey, prof.mappings);
+  // Validación en tiempo real del modal Add contra el perfil activo.
+  // El destino puede ser combo: mods + tecla principal unidos con "+".
+  const [dstMods, setDstMods] = useState<string[]>([]);
+  const dstTarget = joinComboTarget(dstMods, dstKey);
+  const mappingValidation = useMappingValidation(srcKey, dstTarget, prof.mappings);
   // Pausa automática: la toma el usuario con el switch/botón.
   const autoPausedRef = useRef(false);
   // Resume diferido pendiente (debounce anti-flicker).
@@ -792,7 +817,7 @@ export default function App() {
     if (!mappingValidation.canSave) return;
     const next = { ...profiles };
     const cur = next[active];
-    const newMappings = [...cur.mappings, [srcKey, dstKey] as Mapping];
+    const newMappings = [...cur.mappings, [srcKey, dstTarget] as Mapping];
     cur.mappings = newMappings;
     next[active] = { ...cur };
     setProfiles(next);
@@ -1229,7 +1254,7 @@ export default function App() {
                 <span className="hidden sm:block text-[12px] text-on-surface-variant ml-1">{paused ? "paused" : "remap"}</span>
                 <div className="ml-auto flex items-center gap-1.5">
                   <button onClick={()=>toggleMapping(s)} title={paused ? "Resume this mapping" : "Pause this mapping"} aria-label={paused ? `Resume ${s}` : `Pause ${s}`} aria-pressed={!paused} className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container">{paused ? <Play size={14}/> : <Pause size={14}/>}</button>
-                  <button onClick={()=>swapMap(s,d)} title="Swap" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container"><ArrowLeftRight size={14}/></button>
+                  <button onClick={()=>swapMap(s,d)} title={isComboTarget(d) ? "Swap needs a single-key target" : s.startsWith("MOUSE_") ? "Swap needs a keyboard source" : "Swap"} disabled={isComboTarget(d) || s.startsWith("MOUSE_")} className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-container-highest disabled:hover:text-on-surface-variant"><ArrowLeftRight size={14}/></button>
                   <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-primary hover:text-on-primary hover:border-primary transition-colors"><Trash2 size={14}/></button>
                 </div>
               </div>
@@ -1266,11 +1291,31 @@ export default function App() {
               </div>
               <div data-tour="add-target" className={`rounded-2xl border p-3.5 flex flex-col gap-2.5 transition-colors duration-200 ${capturing === "dst" ? "bg-surface-container-high border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant"}`}>
                 <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET · IT TYPES</span>
-                <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "dst" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${dstKey.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "dst" ? "?" : dstKey}</div>
-                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} aria-label="Target key" aria-invalid={mappingValidation.conflict.kind === "self"} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${mappingValidation.conflict.kind === "self" ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
+                <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "dst" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${dstTarget.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "dst" ? "?" : dstTarget}</div>
+                <select value={dstKey} onChange={e=>setDstKey(e.target.value)} aria-label="Target key" aria-invalid={mappingValidation.conflict.kind === "self" || mappingValidation.conflict.kind === "combo"} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${mappingValidation.conflict.kind === "self" || mappingValidation.conflict.kind === "combo" ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
                 <button onClick={()=>{ setTesting(false); setCapturing("dst"); }} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
+              </div>
+            </div>
+            <div data-tour="add-mods" className="mt-3 rounded-2xl border border-outline-variant bg-surface-container-high px-3.5 py-3 flex items-center gap-2">
+              <span className="text-[10px] font-medium tracking-widest text-on-surface-variant shrink-0">COMBO</span>
+              <div className="flex flex-1 gap-1.5" role="group" aria-label="Combo modifiers">
+                {COMBO_MODS.map((m) => {
+                  const on = dstMods.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setDstMods(on ? dstMods.filter((x) => x !== m.id) : [...dstMods, m.id])}
+                      title={`${on ? "Remove" : "Add"} ${m.label} to the combo`}
+                      aria-pressed={on}
+                      className={`flex-1 h-8 rounded-lg border text-[11px] font-medium transition-colors m3-pressable active:scale-[0.97] ${on ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-primary"}`}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div aria-live="polite" className="min-h-[30px] mt-4">

@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-    UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
-    WM_SYSKEYDOWN,
+    UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN,
+    WM_SYSKEYDOWN, MSLLHOOKSTRUCT,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, HIGH_PRIORITY_CLASS, THREAD_PRIORITY_TIME_CRITICAL};
 
@@ -25,6 +25,14 @@ use helpers::{KEYBOARDMANAGER_INJECTED_FLAG, KEYBOARDMANAGER_SUPPRESS_FLAG};
 // Global state — lock-free via ArcSwap inside State
 static mut G_HOOK: HHOOK = HHOOK(std::ptr::null_mut());
 static mut G_HOOK_COPY: HHOOK = HHOOK(std::ptr::null_mut());
+static mut G_MOUSE_HOOK: HHOOK = HHOOK(std::ptr::null_mut());
+
+/// Botones laterales del mouse como fuente (X1/X2 → pseudo-VK).
+/// Reusa el pipeline single/combo: DOWN = pulsar, UP = soltar.
+/// Sin mapeo → pasa de largo (back/forward del navegador intactos).
+const WM_XBUTTONDOWN: u32 = 0x020B;
+const WM_XBUTTONUP: u32 = 0x020C;
+const LLMHF_INJECTED: u32 = 0x00000001;
 static RUNNING: AtomicBool = AtomicBool::new(true);
 static MAIN_DONE: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -49,7 +57,7 @@ static LAT_MAX_US: AtomicU32 = AtomicU32::new(0);
 static LAT_N: AtomicU64 = AtomicU64::new(0);
 
 #[inline(always)]
-fn qpc_now() -> u64 {
+pub(crate) fn qpc_now() -> u64 {
     unsafe {
         let mut t: i64 = 0;
         windows::Win32::System::Performance::QueryPerformanceCounter(&mut t);
@@ -58,7 +66,7 @@ fn qpc_now() -> u64 {
 }
 
 #[inline(always)]
-fn latency_record(dt_ticks: u64) {
+pub(crate) fn latency_record(dt_ticks: u64) {
     let qpf = LAT_QPF.load(Ordering::Relaxed);
     if qpf == 0 {
         return;
@@ -70,12 +78,45 @@ fn latency_record(dt_ticks: u64) {
 }
 
 #[inline(always)]
-fn set_mappings(m: HashMap<u32, u32>) {
+fn set_mappings(m: HashMap<u32, Vec<u32>>) {
     let state = state::global_state();
     state.clear_all();
     for (src, dst) in m {
-        state.set_single_key_remap(src, dst);
+        if dst.len() == 1 {
+            state.set_single_key_remap(src, dst[0]);
+        } else if !dst.is_empty() {
+            state.set_combo_remap(src, dst);
+        }
     }
+}
+
+#[inline(always)]
+unsafe extern "system" fn mouse_hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if n != HC_ACTION as i32 {
+        return CallNextHookEx(G_HOOK_COPY, n, w, l);
+    }
+    let msg = w.0 as u32;
+    if msg != WM_XBUTTONDOWN && msg != WM_XBUTTONUP {
+        return CallNextHookEx(G_HOOK_COPY, n, w, l);
+    }
+    let ms = &*(l.0 as *const MSLLHOOKSTRUCT);
+    if (ms.flags & LLMHF_INJECTED) != 0 {
+        return CallNextHookEx(G_HOOK_COPY, n, w, l);
+    }
+    let mut vk = match (ms.mouseData >> 16) & 0xFFFF {
+        0x0001 => crate::state::VK_MOUSE_X1,
+        0x0002 => crate::state::VK_MOUSE_X2,
+        _ => return CallNextHookEx(G_HOOK_COPY, n, w, l),
+    };
+    let is_down = msg == WM_XBUTTONDOWN;
+    let state = state::global_state();
+    let t0 = qpc_now();
+    let result = keyboard_event_handlers::handle_single_key_remap(&mut vk, is_down, 0, state);
+    if result.is_some() {
+        latency_record(qpc_now().wrapping_sub(t0));
+        return LRESULT(1);
+    }
+    CallNextHookEx(G_HOOK_COPY, n, w, l)
 }
 
 #[inline(always)]
@@ -154,13 +195,29 @@ fn mappings_path() -> PathBuf {
     PathBuf::from("engine_mappings.json")
 }
 
-fn load(p: &Path) -> Option<HashMap<u32, u32>> {
+/// Destino en disco: número (single, formato legacy) o array (combo).
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Targets {
+    One(u32),
+    Many(Vec<u32>),
+}
+
+fn load(p: &Path) -> Option<HashMap<u32, Vec<u32>>> {
     let s = fs::read_to_string(p).ok()?;
-    let m: HashMap<String, u32> = serde_json::from_str(&s).ok()?;
+    let m: HashMap<String, Targets> = serde_json::from_str(&s).ok()?;
     let mut o = HashMap::new();
     for (k, v) in m {
         if let Ok(ki) = k.parse::<u32>() {
-            o.insert(ki, v);
+            match v {
+                Targets::One(x) => {
+                    o.insert(ki, vec![x]);
+                }
+                Targets::Many(xs) if !xs.is_empty() => {
+                    o.insert(ki, xs);
+                }
+                Targets::Many(_) => {}
+            }
         }
     }
     Some(o)
@@ -284,6 +341,7 @@ fn main() {
     unsafe {
         G_HOOK = hook;
         G_HOOK_COPY = hook;
+        G_MOUSE_HOOK = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), HINSTANCE(std::ptr::null_mut()), 0).unwrap_or(HHOOK(std::ptr::null_mut()));
     }
 
     let mp2 = mp.clone();
@@ -411,5 +469,6 @@ fn main() {
         MAIN_DONE.store(true, Ordering::Relaxed);
         windows::Win32::Media::timeEndPeriod(1);
         let _ = UnhookWindowsHookEx(G_HOOK);
+        let _ = UnhookWindowsHookEx(G_MOUSE_HOOK);
     }
 }

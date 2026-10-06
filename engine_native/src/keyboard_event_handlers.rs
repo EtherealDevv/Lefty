@@ -49,6 +49,75 @@ fn batch_push_suppress(inputs: &mut [INPUT; 2], count: &mut usize, w_vk: u16, w_
 }
 
 #[inline(always)]
+fn push_combo_input(inputs: &mut Vec<INPUT>, w_vk_raw: u32, up: bool) {
+    use windows::Win32::UI::Input::KeyboardAndMouse as kbm;
+    let mut flags = if up { KEYEVENTF_KEYUP.0 } else { 0 };
+    if is_extended_key(w_vk_raw) {
+        flags |= kbm::KEYEVENTF_EXTENDEDKEY.0;
+    }
+    inputs.push(INPUT {
+        r#type: kbm::INPUT_KEYBOARD,
+        Anonymous: kbm::INPUT_0 {
+            ki: kbm::KEYBDINPUT {
+                wVk: kbm::VIRTUAL_KEY(filter_artificial_keys(w_vk_raw) as u16),
+                wScan: crate::state::vk_to_scan_cached(w_vk_raw),
+                dwFlags: kbm::KEYBD_EVENT_FLAGS(flags),
+                time: 0,
+                dwExtraInfo: crate::helpers::KEYBOARDMANAGER_SINGLEKEY_FLAG,
+            },
+        },
+    });
+}
+
+/// Combo (`CTRL+S`…): keydown → tap completo en UN SendInput (downs de
+/// mods, tap de la principal, ups de mods en reversa); keyup → suelta de
+/// seguridad de los mods. Repetir la tecla repite el tap (como escribir).
+#[inline(always)]
+pub fn handle_combo_remap(
+    vk_code: u32,
+    targets: &[u32],
+    is_key_down: bool,
+    state: &State,
+) -> Option<()> {
+    if targets.is_empty() {
+        return None;
+    }
+    if targets.iter().any(|&t| t == crate::state::VK_DISABLED) {
+        return Some(());
+    }
+    if !is_key_down {
+        if state.consume_single_key_remap_injection_failed(vk_code) {
+            return None;
+        }
+        let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len().saturating_sub(1));
+        for &m in &targets[..targets.len() - 1] {
+            push_combo_input(&mut inputs, m, true);
+        }
+        if !inputs.is_empty() {
+            unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+        }
+        return Some(());
+    }
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len() * 2);
+    for &m in &targets[..targets.len() - 1] {
+        push_combo_input(&mut inputs, m, false);
+    }
+    let main = targets[targets.len() - 1];
+    push_combo_input(&mut inputs, main, false);
+    push_combo_input(&mut inputs, main, true);
+    for &m in targets[..targets.len() - 1].iter().rev() {
+        push_combo_input(&mut inputs, m, true);
+    }
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent == 0 {
+        state.set_single_key_remap_injection_failed(vk_code, true);
+        return None;
+    }
+    state.set_single_key_remap_injection_failed(vk_code, false);
+    Some(())
+}
+
+#[inline(always)]
 pub fn handle_single_key_remap(
     vk: &mut u32,
     is_key_down: bool,
@@ -62,6 +131,16 @@ pub fn handle_single_key_remap(
     let mut vk_code = *vk;
     update_numpad_with_shift(&mut vk_code, is_key_down, state);
     *vk = vk_code;
+
+    // Combo antes que single: el source vive en una sola tabla.
+    if let Some(combo) = state.get_combo_remap(vk_code) {
+        let t0 = crate::qpc_now();
+        let r = handle_combo_remap(vk_code, &combo, is_key_down, state);
+        if r.is_some() {
+            crate::latency_record(crate::qpc_now().wrapping_sub(t0));
+        }
+        return r;
+    }
 
     let remapped = state.get_single_key_remap(vk_code)?;
 

@@ -140,6 +140,8 @@ fn name_to_vk(name: &str) -> Option<u32> {
         "OEM_8" => Some(0xDF),
         "<" | "OEM_102" => Some(0xE2),
         "DISABLED" => Some(0x100),
+        "MOUSE_X1" => Some(0x105),
+        "MOUSE_X2" => Some(0x106),
         "SHIFT" => Some(0x10),
         "LSHIFT" => Some(0xA0),
         "RSHIFT" => Some(0xA1),
@@ -189,12 +191,26 @@ fn name_to_vk(name: &str) -> Option<u32> {
 
 #[tauri::command]
 fn update_mappings(mappings: Vec<(String, String)>) -> Result<String, String> {
-    let mut vk_map: HashMap<u32, u32> = HashMap::new();
+    let mut vk_map: HashMap<u32, Vec<u32>> = HashMap::new();
     for (s,d) in mappings {
-        if let (Some(sv), Some(dv)) = (name_to_vk(&s), name_to_vk(&d)) {
-            if sv != dv {
-                vk_map.insert(sv, dv);
+        let parts = split_combo_target(&d);
+        let mut vks: Vec<u32> = Vec::with_capacity(parts.len());
+        let mut ok = true;
+        for p in &parts {
+            match name_to_vk(p) {
+                Some(v) => vks.push(v),
+                None => { ok = false; break; }
             }
+        }
+        if !ok || vks.is_empty() {
+            continue;
+        }
+        if let Some(sv) = name_to_vk(&s) {
+            // Self-map de una sola tecla se descarta (la validación ya lo bloquea).
+            if vks.len() == 1 && sv == vks[0] {
+                continue;
+            }
+            vk_map.insert(sv, vks);
         }
     }
     let path = if let Ok(appdata) = std::env::var("APPDATA") {
@@ -204,10 +220,54 @@ fn update_mappings(mappings: Vec<(String, String)>) -> Result<String, String> {
     } else {
         PathBuf::from("engine_mappings.json")
     };
-    let json_map: HashMap<String, u32> = vk_map.iter().map(|(k,v)| (k.to_string(), *v)).collect();
+    // Singles como número (formato legacy intacto), combos como array.
+    let json_map: HashMap<String, EngineTargets> = vk_map
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.to_string(),
+                if v.len() == 1 {
+                    EngineTargets::One(v[0])
+                } else {
+                    EngineTargets::Many(v.clone())
+                },
+            )
+        })
+        .collect();
     let json = serde_json::to_string(&json_map).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| e.to_string())?;
     Ok(format!("wrote {} mappings to {:?}", vk_map.len(), path))
+}
+
+/// Destino en disco: número (single, formato legacy) o array (combo).
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum EngineTargets {
+    One(u32),
+    Many(Vec<u32>),
+}
+
+/// Parte un destino combo (`CTRL+S`) con la misma regla del frontend:
+/// un `""` se pega a la parte anterior (`NUM+` sobrevive intacto).
+fn split_combo_target(dst: &str) -> Vec<String> {
+    if !dst.contains('+') {
+        return vec![dst.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    for part in dst.split('+') {
+        if part.is_empty() && !out.is_empty() {
+            let last = out.len() - 1;
+            out[last].push('+');
+        } else {
+            out.push(part.to_string());
+        }
+    }
+    let clean: Vec<String> = out.into_iter().filter(|p| !p.is_empty()).collect();
+    if clean.is_empty() {
+        vec![dst.to_string()]
+    } else {
+        clean
+    }
 }
 
 #[tauri::command]
@@ -874,6 +934,8 @@ fn vk_to_name(vk: u32) -> String {
         0xDE => "\u{00C7}".to_string(),
         0xE2 => "<".to_string(),
         0xFF | 0x100 => "DISABLED".to_string(),
+        0x105 => "MOUSE_X1".to_string(),
+        0x106 => "MOUSE_X2".to_string(),
         _ => format!("VK_{:02X}", clean),
     }
 }
@@ -899,6 +961,10 @@ fn capture_key() -> Result<String, String> {
         *guard = Some(tx);
     }
     unsafe extern "system" fn cap_hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        use windows::Win32::UI::WindowsAndMessaging::MSLLHOOKSTRUCT;
+        // WM_XBUTTONDOWN/UP sin importar (evita tocar los imports del módulo).
+        const XDOWN: u32 = 0x020B;
+        const XUP: u32 = 0x020C;
         if n == HC_ACTION as i32 {
             let w_u = w.0 as u32;
             let is_key_down = w_u == WM_KEYDOWN || w_u == WM_SYSKEYDOWN;
@@ -907,6 +973,27 @@ fn capture_key() -> Result<String, String> {
             // For Tauri, capturing state is active until first keydown is detected
             let has_capture = CAPTURE_TX.get().and_then(|m| m.lock().ok()).map(|g| g.is_some()).unwrap_or(false);
             if has_capture {
+                // Laterales del mouse: DOWN captura MOUSE_X1/X2, UP se traga.
+                if w_u == XDOWN || w_u == XUP {
+                    if w_u == XDOWN {
+                        let ms = &*(l.0 as *const MSLLHOOKSTRUCT);
+                        let vk = match (ms.mouseData >> 16) & 0xFFFF {
+                            0x0001 => 0x105,
+                            0x0002 => 0x106,
+                            _ => 0,
+                        };
+                        if vk != 0 {
+                            if let Some(mtx) = CAPTURE_TX.get() {
+                                if let Ok(mut guard) = mtx.lock() {
+                                    if let Some(tx) = guard.take() {
+                                        let _ = tx.send((vk, 0));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return LRESULT(1);
+                }
                 if is_key_down {
                     let kb = &*(l.0 as *const KBDLLHOOKSTRUCT);
                     let vk = kb.vkCode;
@@ -938,6 +1025,7 @@ fn capture_key() -> Result<String, String> {
         unsafe { CallNextHookEx(HHOOK(std::ptr::null_mut()), n, w, l) }
     }
     let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(cap_hook), HINSTANCE(std::ptr::null_mut()), 0) }.map_err(|e| format!("hook fail {:?}", e))?;
+    let mouse_hook = unsafe { SetWindowsHookExW(windows::Win32::UI::WindowsAndMessaging::WH_MOUSE_LL, Some(cap_hook), HINSTANCE(std::ptr::null_mut()), 0) }.map_err(|e| format!("mouse hook fail {:?}", e))?;
     let start = std::time::Instant::now();
     let res = loop {
         if let Ok(v) = rx.try_recv() {
@@ -959,6 +1047,7 @@ fn capture_key() -> Result<String, String> {
         }
     };
     unsafe { let _ = UnhookWindowsHookEx(hook); }
+    unsafe { let _ = UnhookWindowsHookEx(mouse_hook); }
     if let Some(mtx) = CAPTURE_TX.get() {
         let _ = mtx.lock().map(|mut g| *g = None);
     }

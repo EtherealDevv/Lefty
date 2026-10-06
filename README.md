@@ -12,7 +12,8 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 ## What is it?
 
 - **WASD → IJKL** (or arrows, numpad) for left-hand movement
-- Map any key to any other: `I→W`, `Q→U`, `Caps→Ctrl`, `Win→Disabled`
+- Map any key to any other: `I→W`, `Q→U`, `Caps→Ctrl`, `Win→Disabled` — or combos like `I→Ctrl+S`
+- Mouse side buttons as sources: `MOUSE_X1→R`, capturable with a click
 - Profiles you can create, rename, duplicate, reorder and delete (Lucide icons, tabbed editor)
 - Games list per profile: auto-switches and works only in your games (empty = manual)
 - Game recommendations: browse installed Steam/Epic games with covers, or capture the app in focus
@@ -63,7 +64,7 @@ cd Lefty
 # Run
 .\dist\Lefty.exe
 # Or install
-.\dist\Lefty_1.5.0_x64-setup.exe
+.\dist\Lefty_1.6.0_x64-setup.exe
 ```
 
 > Run as **Administrator** for games that run elevated.

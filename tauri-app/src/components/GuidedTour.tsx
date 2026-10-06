@@ -26,12 +26,17 @@ const STEPS: TourStep[] = [
   {
     selector: '[data-tour="add-source"]',
     title: "The key you press",
-    text: "Type it, pick from the list, or hit Capture and press the physical key.",
+    text: "Type it, pick from the list, or hit Capture and press the physical key — even mouse side buttons.",
   },
   {
     selector: '[data-tour="add-target"]',
     title: "What it types",
     text: "Same here. Duplicates and self-maps are blocked with a warning.",
+  },
+  {
+    selector: '[data-tour="add-mods"]',
+    title: "Combo it",
+    text: "Hold Ctrl, Shift, Alt or Win with the target — I becomes Ctrl+S. No mods, single key.",
   },
   {
     selector: '[data-tour="add-save"]',
@@ -41,7 +46,7 @@ const STEPS: TourStep[] = [
   {
     selector: '[data-tour="settings"]',
     title: "Make it yours",
-    text: "Accent, sounds, backups and more — all in Settings. Enjoy, lefty.",
+    text: "Accent, games, sounds, backups and more — all in Settings. Enjoy, lefty.",
   },
 ];
 

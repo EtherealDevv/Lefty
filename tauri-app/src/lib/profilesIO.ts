@@ -1,5 +1,6 @@
 // Importación / exportación local de perfiles (sin nube, sin backend).
 import { DEFAULT_PROFILE_ICON } from "./profileIcons";
+import { splitComboTarget } from "./comboTarget";
 // Todo vive en localStorage ("lefty_profiles"); este módulo valida,
 // fusiona y mueve ese JSON hacia/desde archivos `.json` del usuario.
 
@@ -282,42 +283,6 @@ export function applyImportedMerge(imported: ProfilesMap): {
   return { profiles: merged, active };
 }
 
-/** Descarga los perfiles actuales como `lefty-profiles-YYYYMMDD-HHmm.json`. */
-export function exportProfilesToFile(): string {
-  const profiles = getLocalProfiles();
-  if (Object.keys(profiles).length === 0) {
-    throw new Error("Nothing to export: no profiles saved.");
-  }
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-  const filename = `lefty-profiles-${stamp}.json`;
-  const blob = new Blob([JSON.stringify(profiles, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 5000);
-  return filename;
-}
-
-/** Lee y valida un `.json` elegido por el usuario. */
-export async function parseProfilesFile(file: File): Promise<ProfilesMap> {
-  const text = await file.text();
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`"${file.name}" is not valid JSON.`);
-  }
-  return validateProfilesMap(data).profiles;
-}
-
 /** Diccionario de teclas para share codes compactos (mismo orden que FALLBACK_ALL_KEYS).
  *  Nombres fuera de la lista se escapan con `~` + encodeURIComponent. */
 const SHARE_KEY_DICT: readonly string[] = [
@@ -328,7 +293,8 @@ const SHARE_KEY_DICT: readonly string[] = [
   "UP","DOWN","LEFT","RIGHT","INSERT","DELETE","HOME","END","PAGEUP","PAGEDOWN","NUMLOCK","SCROLLLOCK","PRINTSCREEN","PAUSE",
   "`","°","'","?","¡","¿","=","´","¨","[","{","+","*","]","}","Ñ",";",":","Ç","ç","\"",",",".","-","_","/","\\","|","¬",">","<",
   "NUM0","NUM1","NUM2","NUM3","NUM4","NUM5","NUM6","NUM7","NUM8","NUM9","NUM*","NUM+","NUM-","NUM.","NUM/","NUMENTER",
-  "VOLUME_MUTE","VOLUME_DOWN","VOLUME_UP","MEDIA_NEXT","MEDIA_PREV","MEDIA_STOP","MEDIA_PLAY","LAUNCH_MAIL","LAUNCH_MEDIA","BROWSER_BACK","BROWSER_FORWARD","BROWSER_REFRESH","BROWSER_STOP","BROWSER_SEARCH","BROWSER_FAVORITES","BROWSER_HOME","SLEEP","DISABLED"
+  "VOLUME_MUTE","VOLUME_DOWN","VOLUME_UP","MEDIA_NEXT","MEDIA_PREV","MEDIA_STOP","MEDIA_PLAY","LAUNCH_MAIL","LAUNCH_MEDIA","BROWSER_BACK","BROWSER_FORWARD","BROWSER_REFRESH","BROWSER_STOP","BROWSER_SEARCH","BROWSER_FAVORITES","BROWSER_HOME","SLEEP","DISABLED",
+  "MOUSE_X1","MOUSE_X2"
 ];
 
 const SHARE_DICT_IDX = new Map<string, number>(SHARE_KEY_DICT.map((n, i) => [n, i]));
@@ -385,7 +351,11 @@ const SHARE_PREFIX_V2 = "LFT2.";
  * Los mapeos en pausa (`disabled`) NO viajan: el receptor los recibe todos activos.
  */
 export function encodeShareCode(_id: string, profile: Profile): string {
-  const pairs = profile.mappings.map(([s, d]) => `${encKeyName(s)}:${encKeyName(d)}`).join(",");
+  // Destino combo: cada parte se codifica aparte y se une con `+`
+  // (`+` nunca aparece en nombres codificados: base36 o ~b64url).
+  const pairs = profile.mappings
+    .map(([s, d]) => `${encKeyName(s)}:${splitComboTarget(d).map(encKeyName).join("+")}`)
+    .join(",");
   // Icono: nombre Lucide ("Gamepad2") o glifo legacy; nunca contiene ".".
   const icon =
     profile.icon && !profile.icon.includes(".") ? profile.icon : DEFAULT_PROFILE_ICON;
@@ -455,7 +425,7 @@ function decodeShareCodeV2(raw: string): { id: string; profile: Profile } {
       let d: string;
       try {
         s = decKeyName(kv[0]);
-        d = decKeyName(kv[1]);
+        d = kv[1].split("+").map(decKeyName).join("+");
       } catch {
         throw new Error("Invalid share code (unknown key).");
       }

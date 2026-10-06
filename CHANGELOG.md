@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 — 2026-10-06
+- Combo targets: any key to Ctrl/Shift/Alt/Win + key (`I→Ctrl+S`), injected in one batch
+- Mouse side buttons as sources (`MOUSE_X1`/`MOUSE_X2`, capturable with a click)
+- Unified Games list per profile (auto-switch + auto-play from one list)
+- Esc closes dialogs top-down (tour, deletes, browser, Add, Edit, Settings)
+- Share codes carry combos; JSON files retired (share codes only)
+- Updated tour (combos step, mouse capture, games)
+
 ## 1.5.0 — 2026-10-05
 - Per-profile accent color with live preview (falls back to global, shared in codes)
 - High-contrast mode (auto-adjusts accent to ≥4.5:1 legibility)

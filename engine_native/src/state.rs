@@ -1,6 +1,7 @@
 //! State — ultra-optimized for 0-delay gaming
 //! MappingState is lock-free via ArcSwap, dynamic state via atomics
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use arc_swap::ArcSwap;
@@ -8,6 +9,9 @@ use std::sync::Arc;
 
 pub const VK_WIN_BOTH: u32 = 0x104;
 pub const VK_DISABLED: u32 = 0x100;
+/// Pseudo-VK para botones laterales del mouse (fuente, nunca destino).
+pub const VK_MOUSE_X1: u32 = 0x105;
+pub const VK_MOUSE_X2: u32 = 0x106;
 const MAP_SIZE: usize = 512;
 const SCAN_SIZE: usize = 256;
 
@@ -40,6 +44,8 @@ pub fn vk_to_scan_cached(vk: u32) -> u16 {
 pub struct MappingState {
     pub single_key_remap: [Option<u32>; MAP_SIZE],
     pub scan_map: [Option<u32>; SCAN_SIZE],
+    /// Combos: source → [mods…, tecla]. Solo una de las dos tablas tiene al source.
+    pub combo_remap: HashMap<u32, Vec<u32>>,
 }
 
 impl Default for MappingState {
@@ -47,6 +53,7 @@ impl Default for MappingState {
         Self {
             single_key_remap: [None; MAP_SIZE],
             scan_map: [None; SCAN_SIZE],
+            combo_remap: HashMap::new(),
         }
     }
 }
@@ -101,6 +108,7 @@ impl State {
         let mut new_state = (**current).clone();
         let idx = (src as usize) & 0x1FF;
         new_state.single_key_remap[idx] = Some(dst);
+        new_state.combo_remap.remove(&src);
         if crate::helpers::is_numpad_key_affected_by_shift(src) {
             let sc = vk_to_scan_cached(src);
             if sc != 0 && (sc as usize) < SCAN_SIZE {
@@ -115,6 +123,21 @@ impl State {
         let mapping = self.mapping.load();
         let idx = (vk as usize) & 0x1FF;
         mapping.single_key_remap[idx]
+    }
+
+    #[inline(always)]
+    pub fn set_combo_remap(&self, src: u32, dst: Vec<u32>) {
+        let current = self.mapping.load();
+        let mut new_state = (**current).clone();
+        let idx = (src as usize) & 0x1FF;
+        new_state.single_key_remap[idx] = None;
+        new_state.combo_remap.insert(src, dst);
+        self.mapping.store(Arc::new(new_state));
+    }
+
+    #[inline(always)]
+    pub fn get_combo_remap(&self, vk: u32) -> Option<Vec<u32>> {
+        self.mapping.load().combo_remap.get(&vk).cloned()
     }
 
     #[inline(always)]
