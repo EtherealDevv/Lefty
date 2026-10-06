@@ -1,13 +1,23 @@
 # Changelog
 
+## 1.7.0 — 2026-10-06
+- In-app updater: notice banner, release notes, download and install without a browser
+- Combo hold semantics: hold to hold (PTT-ready), auto-repeat ignored, anti-stuck failsafes
+- Graceful engine shutdown: releases every key before exit, no stuck keys on pause/quit
+- Reset all data (Settings → About, double-click to confirm)
+- Elevation warning with restart-as-admin; update spinner wired
+- Tour: dedicated combos step, symmetric Add layout, mouse capture mention
+- Fixed-height Settings and Edit windows (no more jumping, scroll inside)
+- Game browser at root (single scroll), Steam/Epic only, armed capture flow
+- Code health: no dead code, no new warnings
+
 ## 1.6.0 — 2026-10-06
-- Combo targets: any key to Ctrl/Shift/Alt/Win + key (`I→Ctrl+S`), injected in one batch
+- Combo targets: any key to Ctrl/Shift/Alt/Win + key (`I→Ctrl+S`)
 - Mouse side buttons as sources (`MOUSE_X1`/`MOUSE_X2`, capturable with a click)
 - Unified Games list per profile (auto-switch + auto-play from one list)
 - Esc closes dialogs top-down (tour, deletes, browser, Add, Edit, Settings)
-- In-app updater: notice banner, release notes, download and install without a browser
 - Share codes carry combos; JSON files retired (share codes only)
-- Updated tour (combos step, mouse capture, games)
+- Updated tour (mouse capture, games)
 
 ## 1.5.0 — 2026-10-05
 - Per-profile accent color with live preview (falls back to global, shared in codes)

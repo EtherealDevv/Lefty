@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, Plus, Trash2, ArrowLeftRight, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Pause, Gauge, Pencil, Copy, MoreHorizontal, Share2, Check, Download, Loader2, ArrowUp, ArrowDown, X, Github, Search, ChevronDown } from "lucide-react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Pause, Gauge, Pencil, Copy, MoreHorizontal, Share2, Check, Download, Loader2, ArrowUp, ArrowDown, X, Github, Search, ChevronDown } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -139,6 +139,8 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfilesMap>(BUILTIN);
   const [enabled, setEnabled] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
+  const [adminDismissed, setAdminDismissed] = useState(false);
   const [invertMouse, setInvertMouse] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -169,6 +171,27 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
   const [soundsOn, setSoundsOn] = useState<boolean>(() => isSoundEnabled());
+
+  // Reset total: borra todo `lefty_*` y recarga de fábrica (doble clic).
+  const [resetArmed, setResetArmed] = useState(false);
+  const resetAllData = () => {
+    if (!resetArmed) {
+      setResetArmed(true);
+      window.setTimeout(() => setResetArmed(false), 5000);
+      return;
+    }
+    try {
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("lefty_")) doomed.push(k);
+      }
+      for (const k of doomed) localStorage.removeItem(k);
+    } catch {
+      /* sin storage: recargar igual deja defaults en memoria */
+    }
+    window.location.reload();
+  };
 
   // Desbloquear WebAudio con el primer gesto (autoplay policy del WebView)
   useEffect(() => {
@@ -221,7 +244,6 @@ export default function App() {
       return false;
     }
   });
-  const [onboardStep, setOnboardStep] = useState(0);
   useEffect(() => {
     if (firstEnabledSync.current) {
       firstEnabledSync.current = false;
@@ -258,12 +280,10 @@ export default function App() {
       /* sin storage: solo cerrar */
     }
     setShowOnboard(false);
-    setOnboardStep(0);
   };
   // Inicia el tour cerrando antes cualquier modal (si no, el spotlight
   // apuntaría detrás de Settings y parecería roto).
   const startTour = () => {
-    setOnboardStep(0);
     if (showSettings) {
       closeSettings();
       window.setTimeout(() => setShowOnboard(true), 420);
@@ -287,12 +307,13 @@ export default function App() {
   useEffect(() => {
     let stop = false;
     const check = async () => {
+      setCheckingUpdate(true);
       try {
         const ctrl = new AbortController();
         const to = window.setTimeout(() => ctrl.abort(), 8000);
         const res = await fetch("https://api.github.com/repos/EtherealDevv/Lefty/releases/latest", { signal: ctrl.signal });
         window.clearTimeout(to);
-        if (stop || !res.ok) return;
+        if (stop || !res.ok) { if (!stop) setCheckingUpdate(false); return; }
         const data = (await res.json()) as { tag_name?: string; html_url?: string; body?: string; assets?: { name: string; browser_download_url: string }[] };
         const latest = (data.tag_name ?? "").replace(/^v/, "");
         const assets = Array.isArray(data.assets) ? data.assets : [];
@@ -303,6 +324,7 @@ export default function App() {
         try {
           current = (await invoke<string>("get_app_version")).replace(/^v/, "");
         } catch {
+          if (!stop) setCheckingUpdate(false);
           return;
         }
         if (current) setAppVersion(current);
@@ -315,7 +337,9 @@ export default function App() {
             notes: (data.body ?? "").trim() || undefined,
           });
         }
+        if (!stop) setCheckingUpdate(false);
       } catch {
+        if (!stop) setCheckingUpdate(false);
         /* sin red: silencio */
       }
     };
@@ -466,7 +490,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    invoke<boolean>("is_admin").then(setIsAdmin).catch(()=>{});
+    invoke<boolean>("is_admin")
+      .then((v) => { setIsAdmin(v); setAdminChecked(true); })
+      .catch(() => setAdminChecked(true));
     invoke<[number, string][]>("get_key_name_list").then(list => {
       if (Array.isArray(list) && list.length > 10) {
         let names = list.map(([, name]) => name).filter(n => n && n !== "Undefined");
@@ -1108,6 +1134,30 @@ export default function App() {
         </div>
         </div>
       </header>
+
+      {adminChecked && !isAdmin && !adminDismissed && (
+        <div className="px-5 pt-3 max-w-[1440px] w-full mx-auto">
+          <div className="rounded-2xl border border-error/40 bg-error-container/40 px-4 py-2.5 flex items-center gap-3 shadow-m3-1 animate-m3-fade-in">
+            <TriangleAlert size={14} className="shrink-0 text-on-surface" />
+            <p className="flex-1 min-w-0 text-[12px] text-on-surface truncate">
+              Not elevated — mappings won't reach games running as admin
+            </p>
+            <button
+              onClick={() => invoke("restart_as_admin").catch(() => {})}
+              className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium hover:opacity-90 m3-pressable active:scale-[0.98] shrink-0"
+            >
+              Restart as admin
+            </button>
+            <button
+              onClick={() => setAdminDismissed(true)}
+              aria-label="Dismiss elevation warning"
+              className="w-8 h-8 grid place-items-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest shrink-0"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {updateInfo && !updateDismissed && (
         <div className="px-5 pt-3 max-w-[1440px] w-full mx-auto">
@@ -1952,6 +2002,13 @@ export default function App() {
                       className="text-[11px] text-on-surface-variant hover:text-on-surface underline underline-offset-2 mx-auto block"
                     >
                       Replay tour
+                    </button>
+                    <button
+                      onClick={resetAllData}
+                      title="Erase profiles, accents, lists and settings on this PC"
+                      className={`text-[11px] underline underline-offset-2 mx-auto block m3-pressable ${resetArmed ? "text-on-surface font-medium animate-pulse" : "text-on-surface-variant hover:text-on-surface"}`}
+                    >
+                      {resetArmed ? "Click again to erase everything" : "Reset all data"}
                     </button>
                   </div>
                 )}

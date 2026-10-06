@@ -1209,6 +1209,8 @@ fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandl
     if !exe.exists() {
         return Err(format!("lefty_engine.exe no encontrado en {:?}", exe));
     }
+    // Un stop rancio (crash a mitad de apagado) mataría al nuevo al instante.
+    let _ = fs::remove_file(engine_stop_file());
     let mut cmd = Command::new(exe);
     cmd.arg("--parent-pid").arg(std::process::id().to_string())
         .stdin(Stdio::null())
@@ -1224,13 +1226,40 @@ fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandl
     Ok(format!("started pid {} profile {} native", guard.as_ref().unwrap().id(), profile))
 }
 
+/// Parada graceful del engine: pide salida limpia (suelta TODO y sale solo),
+/// espera hasta ~1.5s y solo entonces mata a la fuerza. Así nunca deja
+/// teclas pegadas por un hold a mitad de pausa/cierre.
+fn engine_stop_file() -> PathBuf {
+    if let Ok(a) = std::env::var("APPDATA") {
+        PathBuf::from(a).join("Lefty").join("engine_stop.txt")
+    } else {
+        PathBuf::from("engine_stop.txt")
+    }
+}
+
+fn stop_child_graceful(child: &mut std::process::Child) -> bool {
+    let _ = fs::write(engine_stop_file(), "1");
+    for _ in 0..30 {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
+}
+
 #[tauri::command]
 fn stop_engine(state: State<EngineState>) -> Result<String, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-        Ok("stopped".into())
+        if stop_child_graceful(&mut child) {
+            Ok("stopped".into())
+        } else {
+            Ok("force-stopped".into())
+        }
     } else {
         Ok("not running".into())
     }
@@ -1442,8 +1471,7 @@ fn main() {
                 if let Some(state) = app.try_state::<EngineState>() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(mut child) = guard.take() {
-                            let _ = child.kill();
-                            let _ = child.wait();
+                            stop_child_graceful(&mut child);
                         }
                     }
                 }
@@ -1463,8 +1491,7 @@ fn main() {
                         if let Some(state) = app.try_state::<EngineState>() {
                             if let Ok(mut guard) = state.0.lock() {
                                 if let Some(mut child) = guard.take() {
-                                    let _ = child.kill();
-                                    let _ = child.wait();
+                                    stop_child_graceful(&mut child);
                                 }
                             }
                         }

@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -60,7 +59,7 @@ static LAT_N: AtomicU64 = AtomicU64::new(0);
 pub(crate) fn qpc_now() -> u64 {
     unsafe {
         let mut t: i64 = 0;
-        windows::Win32::System::Performance::QueryPerformanceCounter(&mut t);
+        let _ = windows::Win32::System::Performance::QueryPerformanceCounter(&mut t);
         t as u64
     }
 }
@@ -79,6 +78,8 @@ pub(crate) fn latency_record(dt_ticks: u64) {
 
 #[inline(always)]
 fn set_mappings(m: HashMap<u32, Vec<u32>>) {
+    // Suelta mods de combos en hold antes de tirar el estado (anti-stuck).
+    keyboard_event_handlers::release_all_combo_mods();
     let state = state::global_state();
     state.clear_all();
     for (src, dst) in m {
@@ -147,6 +148,9 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         LAST_HOTKEY_TOGGLE_MS.store(now, Ordering::Relaxed);
         let new_val = !ENABLED.load(Ordering::Relaxed);
         ENABLED.store(new_val, Ordering::Relaxed);
+        if !new_val {
+            keyboard_event_handlers::release_all_combo_mods();
+        }
         if let Ok(appdata) = env::var("APPDATA") {
             let p = PathBuf::from(appdata).join("Lefty").join("f6_toggle.txt");
             let val = new_val;
@@ -276,6 +280,8 @@ fn main() {
         ENABLED.store(false, Ordering::Relaxed);
     }
     let f6_path2 = f6_path.clone();
+    let stop_path = if let Ok(a) = env::var("APPDATA") { PathBuf::from(a).join("Lefty").join("engine_stop.txt") } else { PathBuf::from("engine_stop.txt") };
+    let stop_path2 = stop_path.clone();
     std::thread::spawn(move ||{
         let mut last = fs::read_to_string(&f6_path2).unwrap_or("0".to_string());
         loop{
@@ -285,6 +291,13 @@ fn main() {
                     last = s.clone();
                     ENABLED.store(s.trim() == "1", Ordering::Relaxed);
                 }
+            }
+            // Apagado graceful: soltar TODO, limpiar y salir sin dejar pegadas.
+            if fs::read_to_string(&stop_path2).map(|s| s.trim() == "1").unwrap_or(false) {
+                keyboard_event_handlers::release_all_keys();
+                let _ = fs::remove_file(&stop_path2);
+                unsafe { windows::Win32::Media::timeEndPeriod(1); }
+                std::process::exit(0);
             }
             if !RUNNING.load(Ordering::Relaxed){ break; }
         }

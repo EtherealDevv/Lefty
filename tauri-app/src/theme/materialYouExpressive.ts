@@ -115,8 +115,6 @@ export function generateExpressiveTokens(opts: GenerateOptions = {}) {
     baseHex = "#121212",
     scheme = "monochrome",
     contrast = 0,
-    spec = "2025",
-    platform = "phone",
   } = opts;
 
   const hct = Hct.fromInt(argbFromHex(baseHex));

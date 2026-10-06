@@ -46,6 +46,8 @@ pub struct MappingState {
     pub scan_map: [Option<u32>; SCAN_SIZE],
     /// Combos: source → [mods…, tecla]. Solo una de las dos tablas tiene al source.
     pub combo_remap: HashMap<u32, Vec<u32>>,
+    /// Sources de combo físicamente abajo (anti-repeat del hold).
+    pub combo_held: HashMap<u32, bool>,
 }
 
 impl Default for MappingState {
@@ -54,6 +56,7 @@ impl Default for MappingState {
             single_key_remap: [None; MAP_SIZE],
             scan_map: [None; SCAN_SIZE],
             combo_remap: HashMap::new(),
+            combo_held: HashMap::new(),
         }
     }
 }
@@ -75,7 +78,7 @@ impl State {
 
     #[inline(always)]
     pub fn clear_mapping(&self) {
-        let mut new = MappingState::default();
+        let new = MappingState::default();
         self.mapping.store(Arc::new(new));
         for i in 0..MAP_SIZE {
             self.numpad_pressed[i].store(false, std::sync::atomic::Ordering::Relaxed);
@@ -138,6 +141,30 @@ impl State {
     #[inline(always)]
     pub fn get_combo_remap(&self, vk: u32) -> Option<Vec<u32>> {
         self.mapping.load().combo_remap.get(&vk).cloned()
+    }
+
+    /// Marca el source como abajo. `true` = ya estaba (repeat: no reinyectar).
+    #[inline(always)]
+    pub fn combo_mark_down(&self, vk: u32) -> bool {
+        let current = self.mapping.load();
+        if current.combo_held.contains_key(&vk) {
+            return true;
+        }
+        let mut new_state = (**current).clone();
+        new_state.combo_held.insert(vk, true);
+        self.mapping.store(Arc::new(new_state));
+        false
+    }
+
+    #[inline(always)]
+    pub fn combo_unmark(&self, vk: u32) {
+        if !self.mapping.load().combo_held.contains_key(&vk) {
+            return;
+        }
+        let current = self.mapping.load();
+        let mut new_state = (**current).clone();
+        new_state.combo_held.remove(&vk);
+        self.mapping.store(Arc::new(new_state));
     }
 
     #[inline(always)]

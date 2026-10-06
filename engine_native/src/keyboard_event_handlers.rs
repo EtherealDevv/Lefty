@@ -69,9 +69,35 @@ fn push_combo_input(inputs: &mut Vec<INPUT>, w_vk_raw: u32, up: bool) {
     });
 }
 
-/// Combo (`CTRL+S`…): keydown → tap completo en UN SendInput (downs de
-/// mods, tap de la principal, ups de mods en reversa); keyup → suelta de
-/// seguridad de los mods. Repetir la tecla repite el tap (como escribir).
+/// Suelta de seguridad: keyup de los 8 modificadores. Inofensivo si no
+/// estaban abajo. Cubre keyup perdido o mappings recargados a mitad de hold.
+#[inline(always)]
+pub fn release_all_combo_mods() {
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(8);
+    for &m in &[0xA2u32, 0xA3, 0xA0, 0xA1, 0xA4, 0xA5, 0x5B, 0x5C] {
+        push_combo_input(&mut inputs, m, true);
+    }
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// Suelta TODO (1..=255) en un solo SendInput. Solo para apagado graceful:
+/// soltar lo no presionado es no-op. Cierra stucks por kill a mitad de hold.
+#[inline(always)]
+pub fn release_all_keys() {
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(256);
+    for vk in 1u32..=255u32 {
+        push_combo_input(&mut inputs, vk, true);
+    }
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// Combo (`CTRL+S`…) con semántica de teclado real: keydown → mods abajo +
+/// principal abajo (se quedan); repetir con el source abajo no reinyecta;
+/// keyup → principal arriba + mods arriba en reversa. Sirve para PTT.
 #[inline(always)]
 pub fn handle_combo_remap(
     vk_code: u32,
@@ -89,27 +115,29 @@ pub fn handle_combo_remap(
         if state.consume_single_key_remap_injection_failed(vk_code) {
             return None;
         }
-        let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len().saturating_sub(1));
-        for &m in &targets[..targets.len() - 1] {
+        state.combo_unmark(vk_code);
+        let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len());
+        let main = targets[targets.len() - 1];
+        push_combo_input(&mut inputs, main, true);
+        for &m in targets[..targets.len() - 1].iter().rev() {
             push_combo_input(&mut inputs, m, true);
         }
-        if !inputs.is_empty() {
-            unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+        unsafe {
+            SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         }
         return Some(());
     }
-    let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len() * 2);
+    if state.combo_mark_down(vk_code) {
+        return Some(());
+    }
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(targets.len());
     for &m in &targets[..targets.len() - 1] {
         push_combo_input(&mut inputs, m, false);
     }
-    let main = targets[targets.len() - 1];
-    push_combo_input(&mut inputs, main, false);
-    push_combo_input(&mut inputs, main, true);
-    for &m in targets[..targets.len() - 1].iter().rev() {
-        push_combo_input(&mut inputs, m, true);
-    }
+    push_combo_input(&mut inputs, targets[targets.len() - 1], false);
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
     if sent == 0 {
+        state.combo_unmark(vk_code);
         state.set_single_key_remap_injection_failed(vk_code, true);
         return None;
     }

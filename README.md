@@ -64,7 +64,7 @@ cd Lefty
 # Run
 .\dist\Lefty.exe
 # Or install
-.\dist\Lefty_1.6.0_x64-setup.exe
+.\dist\Lefty_1.7.0_x64-setup.exe
 ```
 
 > Run as **Administrator** for games that run elevated.
