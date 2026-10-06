@@ -8,6 +8,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 ![Latency](https://img.shields.io/badge/Latency-low-success?style=flat)
 ![Rust](https://img.shields.io/badge/Rust-Tauri-orange?style=flat)
 ![Downloads](https://img.shields.io/github/downloads/EtherealDevv/Lefty/total?style=flat)
+[![Telegram](https://img.shields.io/badge/Telegram-Join_Channel-26A5E1?style=flat&logo=telegram&logoColor=white)](https://t.me/+kOXrV-lOGxIyYzkx)
 
 ## What is it?
 
@@ -107,6 +108,12 @@ Lefty/
 - **Not working in game**: Run as **Admin**. Some anti-cheats block hooks → use Interception.
 - **Stuck key**: Pause and resume.
 - **High delay**: Close other hooks (AutoHotkey).
+
+## Community
+
+Questions, layouts to share, bug reports with a human on the other side — join us on Telegram:
+
+[![Join the Telegram channel](https://img.shields.io/badge/Telegram-Join_Channel-26A5E1?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+kOXrV-lOGxIyYzkx)
 
 ## Acknowledgments
 
