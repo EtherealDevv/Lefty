@@ -58,14 +58,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 
 ## Install
 
-```bash
-git clone https://github.com/EtherealDevv/Lefty
-cd Lefty
-# Run
-.\dist\Lefty.exe
-# Or install
-.\dist\Lefty_1.7.0_x64-setup.exe
-```
+Download the latest installer from [Releases](https://github.com/EtherealDevv/Lefty/releases) (`Lefty_*_x64-setup.exe`).
 
 > Run as **Administrator** for games that run elevated.
 
@@ -106,7 +99,7 @@ Lefty/
 ├── engine_native/ # Rust engine (hook + SendInput + telemetry)
 ├── tauri-app/     # Tauri v2 + React UI
 ├── assets/        # banner + screenshots
-└── dist/          # Lefty.exe + installers
+└── dist/          # local test binaries (gitignored, see Releases)
 ```
 
 ## Troubleshooting
