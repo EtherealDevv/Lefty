@@ -111,7 +111,7 @@ Lefty/
 
 ## Community
 
-Questions, layouts to share, bug reports with a human on the other side — join us on Telegram:
+Questions, layouts to share, bug reports:
 
 [![Join the Telegram channel](https://img.shields.io/badge/Telegram-Join_Channel-26A5E1?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+kOXrV-lOGxIyYzkx)
 
