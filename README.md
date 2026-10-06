@@ -26,7 +26,7 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 - Gaming focus: Sticky/Filter key popups stay silent while active
 - Tray menu: switch profiles and pause/resume without opening the window
 - Launch options: autostart, start minimized, start active
-- Update checker + guided tour included
+- Update checker with in-app download + guided tour included
 - Tabbed Settings: General, Appearance, Input, Profiles, About
 - Works in any game (low-level hook)
 - Very low latency native Rust engine (verify live in Settings → About)

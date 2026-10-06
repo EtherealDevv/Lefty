@@ -204,8 +204,13 @@ export default function App() {
   // Telemetría de latencia del engine (About).
   const [latStats, setLatStats] = useState<{ avg_us: number; max_us: number; events: number; ts_ms: number } | null>(null);
   // Update checker.
-  const [updateInfo, setUpdateInfo] = useState<{ latest: string; url: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ latest: string; url: string; downloadUrl?: string; fileName?: string; notes?: string } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloaded, setDownloaded] = useState<{ path: string; size: number } | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+  const [dlMsg, setDlMsg] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   // Onboarding de primer uso.
@@ -288,8 +293,12 @@ export default function App() {
         const res = await fetch("https://api.github.com/repos/EtherealDevv/Lefty/releases/latest", { signal: ctrl.signal });
         window.clearTimeout(to);
         if (stop || !res.ok) return;
-        const data = (await res.json()) as { tag_name?: string; html_url?: string };
+        const data = (await res.json()) as { tag_name?: string; html_url?: string; body?: string; assets?: { name: string; browser_download_url: string }[] };
         const latest = (data.tag_name ?? "").replace(/^v/, "");
+        const assets = Array.isArray(data.assets) ? data.assets : [];
+        const pick =
+          assets.find((a) => /-setup\.exe$/i.test(a.name ?? "")) ??
+          assets.find((a) => /\.msi$/i.test(a.name ?? ""));
         let current = "";
         try {
           current = (await invoke<string>("get_app_version")).replace(/^v/, "");
@@ -301,6 +310,9 @@ export default function App() {
           setUpdateInfo({
             latest: data.tag_name ?? latest,
             url: data.html_url ?? "https://github.com/EtherealDevv/Lefty/releases",
+            downloadUrl: pick?.browser_download_url,
+            fileName: pick?.name,
+            notes: (data.body ?? "").trim() || undefined,
           });
         }
       } catch {
@@ -1097,6 +1109,30 @@ export default function App() {
         </div>
       </header>
 
+      {updateInfo && !updateDismissed && (
+        <div className="px-5 pt-3 max-w-[1440px] w-full mx-auto">
+          <div className="rounded-2xl border border-outline-variant bg-primary-container/25 px-4 py-2.5 flex items-center gap-3 shadow-m3-1 animate-m3-fade-in">
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
+            <p className="flex-1 min-w-0 text-[12px] text-on-surface truncate">
+              New version <span className="font-medium">{updateInfo.latest}</span> available
+            </p>
+            <button
+              onClick={() => { setSettingsTab("about"); setShowSettings(true); }}
+              className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium hover:opacity-90 m3-pressable active:scale-[0.98] shrink-0"
+            >
+              Review
+            </button>
+            <button
+              onClick={() => setUpdateDismissed(true)}
+              aria-label="Dismiss update notice"
+              className="w-8 h-8 grid place-items-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest shrink-0"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 min-h-0 grid grid-cols-12 gap-5 p-5 max-w-[1440px] w-full mx-auto overflow-hidden">
         <aside data-tour="profiles" className="col-span-12 lg:col-span-3 bg-surface-container rounded-[28px] border border-outline-variant flex flex-col overflow-hidden min-h-0 shadow-m3-1">
           <div className="px-4 pt-4 pb-3 border-b border-outline-variant flex items-center justify-between gap-2">
@@ -1822,7 +1858,60 @@ export default function App() {
                             <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">
                               New version <span className="font-medium text-on-surface">{updateInfo.latest}</span> available.
                             </div>
+                            {updateInfo.notes && (
+                              <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1.5 max-h-[120px] overflow-auto whitespace-pre-line">
+                                {updateInfo.notes.slice(0, 600)}
+                              </div>
+                            )}
                             <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                              {downloaded ? (
+                                <>
+                                  <button
+                                    onClick={async () => {
+                                      setDlError(null);
+                                      setDlMsg(null);
+                                      try {
+                                        await invoke<string>("run_installer", { path: downloaded.path });
+                                        setDlMsg("Installer launched — close Lefty if asked.");
+                                      } catch (e) {
+                                        setDlError(e instanceof Error ? e.message : String(e));
+                                      }
+                                    }}
+                                    className="h-8 px-3.5 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5 hover:opacity-90 m3-pressable active:scale-[0.98]"
+                                  >
+                                    <Play size={13} />
+                                    Run installer {(downloaded.size / 1048576).toFixed(1)} MB
+                                  </button>
+                                  <button
+                                    onClick={() => { setDownloaded(null); }}
+                                    className="h-8 px-3.5 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium hover:border-primary m3-pressable active:scale-[0.98]"
+                                  >
+                                    Re-download
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={async () => {
+                                    if (!updateInfo.downloadUrl || downloading) return;
+                                    setDownloading(true);
+                                    setDlError(null);
+                                    try {
+                                      const r = await invoke<{ path: string; size: number }>("download_update", { url: updateInfo.downloadUrl });
+                                      setDownloaded(r);
+                                    } catch (e) {
+                                      setDlError(e instanceof Error ? e.message : String(e));
+                                    } finally {
+                                      setDownloading(false);
+                                    }
+                                  }}
+                                  disabled={!updateInfo.downloadUrl || downloading}
+                                  title={updateInfo.downloadUrl ? updateInfo.fileName : "No installer attached to this release"}
+                                  className="h-8 px-3.5 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5 hover:opacity-90 disabled:opacity-60 m3-pressable active:scale-[0.98]"
+                                >
+                                  {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                                  {downloading ? "Downloading…" : "Download update"}
+                                </button>
+                              )}
                               <button
                                 onClick={async () => {
                                   try {
@@ -1833,12 +1922,19 @@ export default function App() {
                                     /* clipboard bloqueado */
                                   }
                                 }}
-                                className="h-8 px-3.5 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5 hover:opacity-90 m3-pressable active:scale-[0.98]"
+                                title="Copy release page link"
+                                className="h-8 px-3.5 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium flex items-center gap-1.5 hover:border-primary m3-pressable active:scale-[0.98]"
                               >
-                                {linkCopied ? <Check size={13} strokeWidth={3} /> : <Download size={13} />}
-                                {linkCopied ? "Link copied" : "Copy download link"}
+                                {linkCopied ? <Check size={13} strokeWidth={3} /> : <Share2 size={13} />}
+                                {linkCopied ? "Link copied" : "Copy link"}
                               </button>
                             </div>
+                            {dlMsg && (
+                              <div className="text-[11px] text-on-surface-variant mt-1.5">{dlMsg}</div>
+                            )}
+                            {dlError && (
+                              <div className="text-[11px] text-on-surface-variant mt-1.5">Couldn't install from here: {dlError}</div>
+                            )}
                           </>
                         ) : (
                           <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1 flex items-center gap-2">

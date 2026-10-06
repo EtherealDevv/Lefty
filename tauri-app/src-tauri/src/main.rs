@@ -669,6 +669,93 @@ fn update_tray_menu(
     }
     Ok("tray menu updated".into())
 }
+/// Descarga un instalador SOLO de nuestras releases (anti-phishing por diseño).
+/// Devuelve `{ path, bytes }`. El instalador pide su propio UAC al ejecutarse.
+#[derive(serde::Serialize)]
+struct DownloadedUpdate {
+    path: String,
+    bytes: u64,
+}
+
+fn update_download_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("LeftyUpdate");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn update_file_in_dir(path: &str) -> Result<PathBuf, String> {
+    let dir = update_download_dir()?;
+    let p = PathBuf::from(path);
+    if p.parent() != Some(dir.as_path()) || !p.is_file() {
+        return Err("not a downloaded update".into());
+    }
+    match p.extension().and_then(|e| e.to_str()) {
+        Some("exe") | Some("msi") => Ok(p),
+        _ => Err("not an installer".into()),
+    }
+}
+
+#[tauri::command]
+fn download_update(url: String) -> Result<DownloadedUpdate, String> {
+    const PREFIX: &str = "https://github.com/EtherealDevv/Lefty/releases/download/";
+    if !url.starts_with(PREFIX) {
+        return Err("refusing foreign URL".into());
+    }
+    let filename = url
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty() && s.len() < 100)
+        .ok_or("bad filename")?;
+    if filename.contains("..") || filename.contains(['\\', '/', ':']) {
+        return Err("bad filename".into());
+    }
+    if !(filename.ends_with(".exe") || filename.ends_with(".msi")) {
+        return Err("not an installer".into());
+    }
+    let dest = update_download_dir()?.join(filename);
+    let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+    if resp.status() != 200 {
+        return Err(format!("download failed: HTTP {}", resp.status()));
+    }
+    let mut reader = resp.into_reader();
+    let mut file = fs::File::create(&dest).map_err(|e| e.to_string())?;
+    let bytes = std::io::copy(&mut reader, &mut file).map_err(|e| e.to_string())?;
+    if bytes < 1024 {
+        let _ = fs::remove_file(&dest);
+        return Err("download too small, aborted".into());
+    }
+    Ok(DownloadedUpdate {
+        path: dest.to_string_lossy().to_string(),
+        bytes,
+    })
+}
+
+/// Ejecuta un instalador previamente descargado (solo %TEMP%\LeftyUpdate).
+#[tauri::command]
+fn run_installer(path: String) -> Result<String, String> {
+    let p = update_file_in_dir(&path)?;
+    unsafe {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_NORMAL;
+        use windows::core::PCWSTR;
+        let to_w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+        let op = to_w("open");
+        let file = to_w(&p.to_string_lossy());
+        let r = ShellExecuteW(
+            HWND(std::ptr::null_mut()),
+            PCWSTR(op.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_NORMAL,
+        );
+        if (r.0 as usize) <= 32 {
+            return Err(format!("could not launch installer ({})", r.0 as usize));
+        }
+    }
+    Ok("installer launched — close Lefty if asked".into())
+}
 /// App en primer plano (exe + título) para el auto-switch de perfiles.
 /// Solo lectura, sin enforcement: el engine siempre aplica el perfil activo.
 #[derive(serde::Serialize)]
@@ -1341,7 +1428,7 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, scan_steam_games, scan_epic_games, get_app_version, open_external_url, update_tray_menu])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, scan_steam_games, scan_epic_games, get_app_version, open_external_url, update_tray_menu, download_update, run_installer])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {

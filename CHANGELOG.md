@@ -5,6 +5,7 @@
 - Mouse side buttons as sources (`MOUSE_X1`/`MOUSE_X2`, capturable with a click)
 - Unified Games list per profile (auto-switch + auto-play from one list)
 - Esc closes dialogs top-down (tour, deletes, browser, Add, Edit, Settings)
+- In-app updater: notice banner, release notes, download and install without a browser
 - Share codes carry combos; JSON files retired (share codes only)
 - Updated tour (combos step, mouse capture, games)
 
