@@ -1,6 +1,20 @@
 # Changelog
 
-## 1.4.0 — 2026-10-05
+## 1.5.0 — 2026-10-05
+- Per-profile accent color with live preview (falls back to global, shared in codes)
+- High-contrast mode (auto-adjusts accent to ≥4.5:1 legibility)
+- Pause individual mappings without deleting (engine gets active ones only)
+- Games list per profile: auto-switches and works only there (empty = manual)
+- Game recommendations: browse installed Steam/Epic games with covers, or capture the app in focus
+- Faster, adaptive focus poll (250ms when watched, 2s idle) with stable-focus debounce
+- Automatic backups before import/restore, one-click restore
+- Share-code import preview with merge/replace confirm
+- Live key tester in Add mapping (what the game sees, paused-aware)
+- Tabbed profile editor (General/Appearance/Automation) with live sidebar preview
+- Tray menu: switch profiles and pause/resume without opening the window
+- Hotkey anti-repeat debounce in engine; auto toggles are silent (chime stays manual-only)
+- Fixed double-toggle at startup (stale toggle file vs launch preference)
+- Hotfixes: no toggle bursts when holding the hotkey; stable focus transitions (settle/debounce, manual control always wins)
 - Complete researched profiles: IJKL (22 binds), Arrows (17), Numpad 8456 (20),
   OKL; Mirror (23); one-time factory migration for existing users
 - Fixed silent key-name resolution (frontend aliases + case-insensitive match,

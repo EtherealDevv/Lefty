@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, Plus, Trash2, ArrowLeftRight, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Gauge, Pencil, Copy, MoreHorizontal, Share2, Check, Download, Loader2, ArrowUp, ArrowDown, X, Github } from "lucide-react";
+import { Keyboard, Plus, Trash2, ArrowLeftRight, Activity, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, Lightbulb, Shield, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Pause, Gauge, Pencil, Copy, MoreHorizontal, Share2, Check, Download, Loader2, ArrowUp, ArrowDown, X, Github, Search, ChevronDown } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import laskIcon from "./LASK.png";
 import ProfileImportExport from "./components/ProfileImportExport";
+import GameBrowser from "./components/GameBrowser";
 import AccentColorSection from "./components/AccentColorSection";
 import { PROFILE_ICONS, ProfileGlyph, DEFAULT_PROFILE_ICON, migrateLegacyIcon } from "./lib/profileIcons";
+import { useAccent, applyAccent, resolveAccent, normalizeProfileAccent, adjustForContrast, ACCENT_PRESETS, contrastOn } from "./theme/accent";
 import GuidedTour from "./components/GuidedTour";
 import { useMappingValidation } from "./lib/useMappingValidation";
 import { isSoundEnabled, setSoundEnabled, playToggleSound, unlockAudio } from "./lib/toggleSound";
-import { encodeShareCode } from "./lib/profilesIO";
+import { encodeShareCode, type Profile, type Mapping, type ProfilesMap } from "./lib/profilesIO";
 import { copyText } from "./lib/clipboard";
-
-type Mapping = [string, string];
-type Profile = { display_name: string; description: string; icon: string; mappings: Mapping[]; autoApps?: string[] };
 
 const FALLBACK_ALL_KEYS = [
   // Letters A-Z
@@ -34,7 +34,7 @@ const FALLBACK_ALL_KEYS = [
   "VOLUME_MUTE","VOLUME_DOWN","VOLUME_UP","MEDIA_NEXT","MEDIA_PREV","MEDIA_STOP","MEDIA_PLAY","LAUNCH_MAIL","LAUNCH_MEDIA","BROWSER_BACK","BROWSER_FORWARD","BROWSER_REFRESH","BROWSER_STOP","BROWSER_SEARCH","BROWSER_FAVORITES","BROWSER_HOME","SLEEP","DISABLED"
 ];
 
-const BUILTIN: Record<string, Profile> = {
+const BUILTIN: ProfilesMap = {
   // Modelo: [tecla física mano derecha] → [tecla que espera el juego].
   // El juego keeps sus bindings WASD por defecto; tu mano derecha juega en
   // el cluster derecho. Modificadores/ESPACIO/ENTER derechos NO se mapean
@@ -93,9 +93,47 @@ function isNewerVersion(latest: string, current: string): boolean {
   return false;
 }
 
+// ── Mapeos pausados ──────────────────────────────────────────────────
+// `Profile.disabled` guarda sources en pausa: reservan su source (la
+// validación los trata como ocupados) pero NO llegan al engine.
+
+/** Podado: solo conserva sources presentes en mappings. */
+function pruneDisabledSources(mappings: Mapping[], disabled: readonly string[] | undefined): string[] {
+  if (!disabled || disabled.length === 0) return [];
+  const srcs = new Set(mappings.map(([s]) => s));
+  return [...new Set(disabled.filter((d) => srcs.has(d)))];
+}
+
+/** Sources pausados válidos del perfil. */
+function disabledSet(p: Profile): Set<string> {
+  return new Set(pruneDisabledSources(p.mappings, p.disabled));
+}
+
+/** Lo que realmente recibe el engine (activos). */
+function engineMappings(p: Profile): Mapping[] {
+  const off = p.disabled;
+  if (!off || off.length === 0) return p.mappings;
+  const set = disabledSet(p);
+  return set.size === 0 ? p.mappings : p.mappings.filter(([s]) => !set.has(s));
+}
+
+/** ¿El exe/título en foco corresponde a la lista (autoApps o playApps)? */
+function matchesAppList(apps: readonly string[] | undefined, exe: string, title: string): boolean {
+  if (!apps || apps.length === 0) return false;
+  return apps.some((a) => {
+    const n = a.trim().toLowerCase();
+    return n !== "" && (exe === n || (title !== "" && title.includes(n)));
+  });
+}
+
+/** ¿El exe/título en foco corresponde a las autoApps del perfil? */
+function profileMatchesApps(p: Profile | undefined, exe: string, title: string): boolean {
+  return matchesAppList(p?.autoApps, exe, title);
+}
+
 export default function App() {
   const [active, setActive] = useState("zurdo_ijkl");
-  const [profiles, setProfiles] = useState<Record<string, Profile>>(BUILTIN);
+  const [profiles, setProfiles] = useState<ProfilesMap>(BUILTIN);
   const [enabled, setEnabled] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [invertMouse, setInvertMouse] = useState(false);
@@ -108,6 +146,10 @@ export default function App() {
   const [dstKey, setDstKey] = useState("I");
   const [capturing, setCapturing] = useState<null | "src" | "dst">(null);
   const [allKeys, setAllKeys] = useState<string[]>(FALLBACK_ALL_KEYS);
+  // Probador en vivo del modal Add: última tecla física capturada.
+  const [testing, setTesting] = useState(false);
+  const [testKey, setTestKey] = useState<string | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
   const [autostart, setAutostart] = useState(false);
   const [hideToTray, setHideToTray] = useState(true);
   const [startMinimized, setStartMinimized] = useState(false);
@@ -115,6 +157,12 @@ export default function App() {
     try { return localStorage.getItem("lefty_start_active") === "true"; } catch { return false; }
   });
   const [hotkey, setHotkey] = useState("F6");
+  // Auto-play por allowlist (solo perfiles con playApps).
+  const [autoPause, setAutoPause] = useState<boolean>(() => {
+    try { return localStorage.getItem("lefty_autopause_focus") !== "false"; } catch { return true; }
+  });
+  // Espejo en estado del auto-pause para mostrar el badge AUTO.
+  const [autoHeld, setAutoHeld] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
   const [soundsOn, setSoundsOn] = useState<boolean>(() => isSoundEnabled());
@@ -130,8 +178,23 @@ export default function App() {
     };
   }, []);
 
-  // Chime al cambiar ACTIVE/INACTIVE (botón o hotkey); sin sonido en el sync inicial
+  // Chime al cambiar ACTIVE/INACTIVE (botón o hotkey); sin sonido en el sync inicial.
+  // Los cambios automáticos (auto-pausa) son silenciosos: chime solo manual.
   const firstEnabledSync = useRef(true);
+  const suppressChimeRef = useRef(false);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  useEffect(() => {
+    if (firstEnabledSync.current) {
+      firstEnabledSync.current = false;
+      return;
+    }
+    if (suppressChimeRef.current) {
+      suppressChimeRef.current = false;
+      return;
+    }
+    playToggleSound(enabled);
+  }, [enabled]);
   // El arranque (fichero + spawn del engine) se ejecuta UNA sola vez por
   // sesión: los re-runs del efecto por profiles/active solo reponen el poll.
   const launchedRef = useRef(false);
@@ -249,8 +312,26 @@ export default function App() {
 
   // Auto-switch: si la app en foco coincide con la lista de otro perfil,
   // cambiar solo cuando cambia el foco (nunca pelea con tu selección manual).
+  // Auto-play (allowlist playApps): los mapeos solo viven en TUS juegos.
+  // Entras → reanudar (si pausamos nosotros); sales → pausar. Lista
+  // vacía = manual, sin automatismo. Solo en transiciones de foco y con
+  // settle/debounce anti-transitorias. El control manual siempre gana.
   const lastFgSig = useRef("");
+  const fgPrimed = useRef(false);
+  // Poll adaptativo: rápido (250ms) solo si hay listas que vigilar
+  // (autoApps o playApps en algún perfil); si no, 2s de bajo consumo.
+  const FG_FAST_MS = 250;
+  const FG_SLOW_MS = 2000;
+  const PAUSE_SETTLE_MS = 250;
+  const RESUME_SETTLE_MS = 350;
   useEffect(() => {
+    // Sin el toggle, o sin listas en ningún perfil: poll lento.
+    const watch =
+      autoPause &&
+      Object.values(profiles).some(
+        (p) => (p.autoApps?.length ?? 0) > 0 || (p.playApps?.length ?? 0) > 0
+      );
+    const interval = watch ? FG_FAST_MS : FG_SLOW_MS;
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
@@ -260,28 +341,86 @@ export default function App() {
         const sig = `${fg.exe}\n${fg.title}`.toLowerCase();
         if (!stop && sig !== lastFgSig.current) {
           lastFgSig.current = sig;
+          // Nuevo foco: cancela diferidos pendientes (era una transitoria).
+          if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = undefined; }
+          if (pauseTimer.current) { clearTimeout(pauseTimer.current); pauseTimer.current = undefined; }
           const exe = fg.exe.toLowerCase();
           const title = fg.title.toLowerCase();
           const hit = Object.entries(profiles).find(
-            ([id, p]) =>
-              id !== active &&
-              (p.autoApps ?? []).some((a) => {
-                const n = a.trim().toLowerCase();
-                return n !== "" && (exe === n || (title !== "" && title.includes(n)));
-              })
+            ([id, p]) => id !== active && profileMatchesApps(p, exe, title)
           );
+          const curId = hit ? hit[0] : active;
           if (hit) setActive(hit[0]);
+          const cur = hit ? hit[1] : profiles[active];
+          // Primer tick: solo se salta si Lefty está enfocado (editar sin
+          // interferencias); si arrancas ya en el juego, evalúa de una vez.
+          const first = !fgPrimed.current;
+          fgPrimed.current = true;
+          const skipFirst = first && exe === "lefty.exe";
+          // Allowlist por perfil (playApps): en zona → reanudar si pausamos
+          // nosotros; fuera → pausar. Vacía = manual, no se toca nada.
+          // Al caer en un perfil manual por switch, también se reanuda:
+          // el cambio de contexto ya es señal suficiente.
+          const queueResume = (m: Mapping[], id: string) => {
+            if (resumeTimer.current) return;
+            const sigAtSchedule = sig;
+            resumeTimer.current = setTimeout(() => {
+              resumeTimer.current = undefined;
+              if (stop || lastFgSig.current !== sigAtSchedule) return;
+              if (!autoPausedRef.current || enabledRef.current) return;
+              autoPausedRef.current = false;
+              setAutoHeld(false);
+              suppressChimeRef.current = true;
+              setEnabled(true);
+              invoke("set_engine_enabled", { enabled: true })
+                .then(() => {
+                  invoke("update_mappings", { mappings: m }).catch(() => {});
+                  invoke("start_engine", { profile: id }).catch(() => {});
+                })
+                .catch(() => {});
+            }, RESUME_SETTLE_MS);
+          };
+          const queuePause = () => {
+            if (pauseTimer.current) return;
+            const sigAtSchedule = sig;
+            pauseTimer.current = setTimeout(() => {
+              pauseTimer.current = undefined;
+              if (stop || lastFgSig.current !== sigAtSchedule) return;
+              if (!enabledRef.current || autoPausedRef.current) return;
+              autoPausedRef.current = true;
+              setAutoHeld(true);
+              suppressChimeRef.current = true;
+              setEnabled(false);
+              invoke("set_engine_enabled", { enabled: false })
+                .then(() => invoke("stop_engine").catch(() => {}))
+                .catch(() => {});
+            }, PAUSE_SETTLE_MS);
+          };
+          if (autoPause && !skipFirst && cur) {
+            if (hit && autoPausedRef.current && !enabled && (cur.playApps ?? []).length === 0) {
+              queueResume(engineMappings(cur), curId);
+            } else if ((cur.playApps ?? []).length > 0) {
+              const inZone = matchesAppList(cur.playApps, exe, title);
+              if (inZone && autoPausedRef.current && !enabled) queueResume(engineMappings(cur), curId);
+              else if (!inZone && enabled && !autoPausedRef.current) queuePause();
+            }
+          }
         }
       } catch {
         /* sin foco legible: no tocar nada */
       }
-      if (!stop) timer = setTimeout(tick, 1500);
+      if (!stop) timer = setTimeout(tick, interval);
     };
-    timer = setTimeout(tick, 1200);
-    return () => { stop = true; if (timer) clearTimeout(timer); };
-  }, [profiles, active]);
+    timer = setTimeout(tick, interval);
+    return () => { stop = true; if (timer) clearTimeout(timer); if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = undefined; } if (pauseTimer.current) { clearTimeout(pauseTimer.current); pauseTimer.current = undefined; } };
+  }, [profiles, active, enabled, autoPause]);
 
   const closeAdd = () => {
+    setTesting(false);
+    setTestKey(null);
+    setTestOpen(false);
+    setArmedCapture(false);
+    setCapturing(null);
     setClosingAdd(true);
     setTimeout(() => { setShowAdd(false); setClosingAdd(false); }, 380);
   };
@@ -328,10 +467,22 @@ export default function App() {
     try {
       const saved = localStorage.getItem("lefty_profiles");
       if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, Profile>;
+        const parsed = JSON.parse(saved) as ProfilesMap;
         // Migración única: glifos legacy → iconos Lucide.
         for (const p of Object.values(parsed)) {
           if (p && typeof p.icon === "string") p.icon = migrateLegacyIcon(p.icon);
+          // Podado: la lista de pausados solo conserva sources existentes.
+          if (p && p.disabled) p.disabled = pruneDisabledSources(p.mappings ?? [], p.disabled);
+          // Migración pauseApps → playApps (allowlist): misma lista, semántica nueva.
+          const legacy = p as Profile & { pauseApps?: unknown };
+          if (p && !p.playApps && Array.isArray(legacy.pauseApps)) {
+            const apps = legacy.pauseApps
+              .filter((x): x is string => typeof x === "string")
+              .map((a) => a.trim().toLowerCase())
+              .filter((a) => a.length > 0);
+            if (apps.length > 0) p.playApps = [...new Set(apps)];
+          }
+          if (p && "pauseApps" in p) delete (p as Record<string, unknown>).pauseApps;
         }
         // Migración de builtins (una vez): añade los nuevos que falten y
         // actualiza los idénticos a la fábrica vieja (los tocados se respetan).
@@ -410,17 +561,123 @@ export default function App() {
     return () => { cancelled = true; };
   }, [capturing, allKeys]);
 
+  // Menú del tray: Show, pause/resume, perfiles (checked el activo), Close.
+  // El toggle del tray reusa la misma función que el switch del header.
+  const toggleRef = useRef<() => Promise<void>>(async () => {});
+  const profilesRef = useRef(profiles);
+  useEffect(() => {
+    toggleRef.current = toggle;
+    profilesRef.current = profiles;
+  });
+  useEffect(() => {
+    let off1: (() => void) | undefined;
+    let off2: (() => void) | undefined;
+    let dead = false;
+    (async () => {
+      try {
+        const u1 = await listen("tray-toggle", () => {
+          toggleRef.current();
+        });
+        const u2 = await listen<string>("tray-switch-profile", (e) => {
+          const id = e.payload;
+          if (id && profilesRef.current[id]) setActive(id);
+        });
+        if (dead) {
+          u1();
+          u2();
+        } else {
+          off1 = u1;
+          off2 = u2;
+        }
+      } catch {
+        /* sin backend de eventos: el tray queda con Show/Close */
+      }
+    })();
+    return () => {
+      dead = true;
+      off1?.();
+      off2?.();
+    };
+  }, []);
+  useEffect(() => {
+    invoke("update_tray_menu", {
+      profiles: Object.entries(profiles).map(([id, p]) => ({ id, name: p.display_name })),
+      active,
+      enabled,
+    }).catch(() => {});
+  }, [profiles, active, enabled]);
+
+  // Probador en vivo: captura teclas en bucle y muestra qué vería el juego
+  // según el perfil activo (sin inyectar nada). Mutuamente excluyente con Capture.
+  useEffect(() => {
+    if (!testing) return;
+    let cancelled = false;
+    const normalize = (key: string): string | null => {
+      if (allKeys.includes(key)) return key;
+      if (key.length === 1) {
+        const up = key.toUpperCase();
+        if (allKeys.includes(up)) return up;
+        if (key.startsWith("VK_")) return key;
+        return null;
+      }
+      if (key.includes("(") || key.includes("VK")) return key;
+      return null;
+    };
+    const loop = async () => {
+      while (!cancelled) {
+        try {
+          const key = await invoke<string>("capture_key");
+          if (cancelled) return;
+          const norm = normalize(key);
+          if (norm) setTestKey(norm);
+        } catch {
+          if (cancelled) return;
+          // Sin tecla / error del engine: pequeña pausa para no girar en caliente.
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    };
+    loop();
+    return () => { cancelled = true; };
+  }, [testing, allKeys]);
+
   const prof = profiles[active];
+  const [mapFilter, setMapFilter] = useState("");
+  const [showFilter, setShowFilter] = useState(false);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const filterQuery = mapFilter.trim().toLowerCase();
+  const visibleMappings = filterQuery
+    ? prof.mappings.filter(
+        ([s, d]) => s.toLowerCase().includes(filterQuery) || d.toLowerCase().includes(filterQuery)
+      )
+    : prof.mappings;
+  const pausedSrcs = disabledSet(prof);
+  const pausedCount = pausedSrcs.size;
+
+  useEffect(() => {
+    if (showFilter) filterRef.current?.focus();
+    else setMapFilter("");
+  }, [showFilter]);
   // Validación en tiempo real del modal Add contra el perfil activo
   const mappingValidation = useMappingValidation(srcKey, dstKey, prof.mappings);
+  // Pausa automática: la toma el usuario con el switch/botón.
+  const autoPausedRef = useRef(false);
+  // Resume diferido pendiente (debounce anti-flicker).
+  const resumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Pausa diferida pendiente (settle: el foco debe quedarse fuera/dentro).
+  const pauseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toggle = async () => {
     // Optimista: la UI y el chime son instantáneos; f6_toggle.txt manda y el poll corrige.
+    autoPausedRef.current = false;
+    setAutoHeld(false);
+    if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = undefined; }
+    if (pauseTimer.current) { clearTimeout(pauseTimer.current); pauseTimer.current = undefined; }
     const next = !enabled;
     setEnabled(next);
     try {
       await invoke("set_engine_enabled", { enabled: next });
       if (next) {
-        await invoke("update_mappings", { mappings: prof.mappings });
+        await invoke("update_mappings", { mappings: engineMappings(prof) });
         await invoke("start_engine", { profile: active });
       } else {
         await invoke("stop_engine");
@@ -457,11 +714,33 @@ export default function App() {
     invoke("update_mappings", { mappings }).catch(()=>{});
   };
 
+  /** Sincroniza un perfil al engine (solo mapeos activos). */
+  const syncProfile = (p: Profile) => {
+    syncEngine(engineMappings(p));
+  };
+
+  // Acento por perfil: si el activo trae uno válido, manda; si no, el global.
+  // El pintado se centraliza aquí (el provider solo persiste el global).
+  // applyAccent respeta el modo alto contraste; highContrast en deps repinta al conmutar.
+  const { accent, accentHex, highContrast } = useAccent();
   useEffect(() => {
-    syncEngine(profiles[active].mappings);
+    syncProfile(profiles[active]);
   }, [active]);
+  useEffect(() => {
+    const stored = profiles[active]?.accent;
+    const perProfile = normalizeProfileAccent(stored);
+    if (perProfile) {
+      applyAccent(resolveAccent(perProfile).hex);
+    } else {
+      applyAccent(accentHex);
+    }
+  }, [active, profiles, accentHex, highContrast]);
 
   // Auto-start: apply the launch preference, then load profiles and start engine
+  // El poll de 100ms NO sincroniza hasta que el arranque escribe la
+  // preferencia: si no, el f6_toggle.txt rancio de la sesión anterior
+  // voltea la UI dos veces (activo→pausado con doble chime).
+  const engineReadyRef = useRef(false);
   useEffect(() => {
     const t = setTimeout(() => {
       if (launchedRef.current) return;
@@ -479,15 +758,20 @@ export default function App() {
             try { curProfiles = JSON.parse(saved); } catch {}
           }
           if (savedActive) curActive = savedActive;
-          const m = curProfiles[curActive]?.mappings || profiles[active]?.mappings || [];
+          const cp = (curProfiles[curActive] ?? profiles[active]) as Profile | undefined;
+          const m = cp ? engineMappings(cp) : [];
           invoke("update_mappings", {mappings: m}).then(()=> invoke("start_engine", {profile: curActive}).catch(()=>{})).catch(()=>{});
         } catch {
-          invoke("update_mappings", {mappings: profiles[active].mappings}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
+          invoke("update_mappings", {mappings: engineMappings(profiles[active])}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
         }
       };
-      invoke("set_engine_enabled", { enabled: startActive }).then(launch).catch(launch);
+      const go = () => { engineReadyRef.current = true; launch(); };
+      invoke("set_engine_enabled", { enabled: startActive }).then(go).catch(go);
     }, 400);
     const id = setInterval(async () => {
+      // Hasta que el arranque escribe la preferencia, el fichero manda
+      // basura de la sesión anterior: no espejarlo.
+      if (!engineReadyRef.current) return;
       try {
         const state = await invoke<boolean>("get_engine_enabled");
         setEnabled(prev => prev !== state ? state : prev);
@@ -512,29 +796,47 @@ export default function App() {
     cur.mappings = newMappings;
     next[active] = { ...cur };
     setProfiles(next);
-    syncEngine(newMappings);
+    syncProfile(next[active]);
     closeAdd();
   };
 
   const swapMap = (s: string, d: string) => {
     const next = { ...profiles };
     const cur = next[active];
-    let newMappings = cur.mappings.filter(([src]) => src !== s);
+    const wasOff = (cur.disabled ?? []).includes(s);
+    const newMappings = cur.mappings.filter(([src]) => src !== s);
+    let disabled = (cur.disabled ?? []).filter((x) => x !== s);
     if (!newMappings.some(([src]) => src === d)) {
-      newMappings = [...newMappings, [d, s] as Mapping];
+      newMappings.push([d, s] as Mapping);
+      // La pausa sigue al remapeo: si s estaba en pausa, d hereda la pausa.
+      if (wasOff) disabled = [...disabled, d];
     }
-    cur.mappings = newMappings;
-    next[active] = { ...cur };
+    next[active] = { ...cur, mappings: newMappings, disabled: pruneDisabledSources(newMappings, disabled) };
     setProfiles(next);
-    syncEngine(newMappings);
+    syncProfile(next[active]);
   };
 
   const delMap = (src: string) => {
     const next = { ...profiles };
-    const newMappings = next[active].mappings.filter(([s]) => s !== src);
-    next[active] = { ...next[active], mappings: newMappings };
+    const cur = next[active];
+    const newMappings = cur.mappings.filter(([s]) => s !== src);
+    next[active] = { ...cur, mappings: newMappings, disabled: pruneDisabledSources(newMappings, cur.disabled) };
     setProfiles(next);
-    syncEngine(newMappings);
+    syncProfile(next[active]);
+  };
+
+  /** Pausa/reanuda un mapeo suelto (reserva su source, no llega al engine). */
+  const toggleMapping = (src: string) => {
+    const cur = profiles[active];
+    const off = new Set(cur.disabled ?? []);
+    if (off.has(src)) off.delete(src);
+    else off.add(src);
+    const next = {
+      ...profiles,
+      [active]: { ...cur, disabled: pruneDisabledSources(cur.mappings, [...off]) },
+    };
+    setProfiles(next);
+    syncProfile(next[active]);
   };
 
   // ── Profile CRUD ──
@@ -547,8 +849,12 @@ export default function App() {
   const [closingEdit, setClosingEdit] = useState(false);
   const [editName, setEditName] = useState("");
   const [editIcon, setEditIcon] = useState<string>(DEFAULT_PROFILE_ICON);
-  const [editAutoApps, setEditAutoApps] = useState<string[]>([]);
-  const [appDraft, setAppDraft] = useState("");
+  const [editAccent, setEditAccent] = useState<string | null>(null);
+  const [editGames, setEditGames] = useState<string[]>([]);
+  const [gameDraft, setGameDraft] = useState("");
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [pickHint, setPickHint] = useState<string | null>(null);
+  const [editTab, setEditTab] = useState<"general" | "appearance" | "automation">("general");
 
   const closeProfileModal = () => {
     setClosingProfile(true);
@@ -560,31 +866,59 @@ export default function App() {
     if (!p) return;
     setEditName(p.display_name);
     setEditIcon(p.icon || DEFAULT_PROFILE_ICON);
-    setEditAutoApps((p.autoApps ?? []).map((a) => a.trim().toLowerCase()).filter((a) => a.length > 0));
-    setAppDraft("");
+    setEditAccent(normalizeProfileAccent(p.accent) ?? null);
+    // Una sola lista Games: unión de autoApps + playApps (mismo contenido).
+    const unionGames = (p: Profile): string[] => [...new Set([...(p.autoApps ?? []), ...(p.playApps ?? [])])]
+      .map((a) => a.trim().toLowerCase())
+      .filter((a) => a.length > 0);
+    setEditGames(unionGames(p));
+    setGameDraft("");
+    setShowBrowser(false);
+    setPickHint(null);
+    setEditTab("general");
     setEditProfileId(id);
     setCreatingProfile(false);
     setOpenMenuId(null);
   };
 
-  const closeEditProfile = () => {
+  const closeEditProfile = (revertPreview = true) => {
+    setShowBrowser(false);
+    setArmedCapture(false);
+    if (revertPreview) {
+      // Revertir el preview del picker al efectivo del perfil activo.
+      const perProfile = normalizeProfileAccent(profiles[active]?.accent);
+      applyAccent(perProfile ? resolveAccent(perProfile).hex : accentHex);
+    }
     setClosingEdit(true);
     setTimeout(() => { setEditProfileId(null); setCreatingProfile(false); setClosingEdit(false); }, 320);
+  };
+
+  // Picker con preview en vivo: pinta al elegir, Save lo hace definitivo,
+  // Cancel (closeEditProfile) revierte al efectivo del activo.
+  const pickEditAccent = (v: string | null) => {
+    const norm = v === null ? null : normalizeProfileAccent(v) ?? null;
+    // Si el custom venía en minúsculas, normalizar a mayúsculas.
+    setEditAccent(norm);
+    if (norm) applyAccent(resolveAccent(norm).hex);
+    else applyAccent(accentHex);
   };
 
   const saveEditProfile = () => {
     const name = editName.trim();
     if (!name) return;
-    const autoApps = editAutoApps.length > 0 ? [...editAutoApps] : undefined;
+    const games = editGames.length > 0 ? [...editGames] : undefined;
+    const autoApps = games;
+    const playApps = games;
+    const accent = normalizeProfileAccent(editAccent) ?? undefined;
     if (creatingProfile) {
       const id = `custom_${Date.now().toString(36)}`;
-      const p: Profile = { display_name: name, description: "Custom layout", icon: editIcon || DEFAULT_PROFILE_ICON, mappings: [], autoApps };
+      const p: Profile = { display_name: name, description: "Custom layout", icon: editIcon || DEFAULT_PROFILE_ICON, mappings: [], autoApps, playApps, accent };
       setProfiles({ ...profiles, [id]: p });
       setActive(id);
       setOpenMenuId(null);
       syncEngine([]);
       setCreatingProfile(false);
-      closeEditProfile();
+      closeEditProfile(false);
       return;
     }
     if (!editProfileId || !profiles[editProfileId]) return;
@@ -595,24 +929,64 @@ export default function App() {
         display_name: name,
         icon: editIcon || DEFAULT_PROFILE_ICON,
         autoApps,
+        playApps,
+        accent,
       },
     });
-    closeEditProfile();
+    closeEditProfile(false);
   };
 
-  const addAutoApp = () => {
-    const norm = appDraft.trim().toLowerCase();
-    if (!norm || editAutoApps.includes(norm)) return;
-    setEditAutoApps([...editAutoApps, norm]);
-    setAppDraft("");
+  const addGameApp = () => {
+    const norm = gameDraft.trim().toLowerCase();
+    if (!norm || editGames.includes(norm)) return;
+    setEditGames([...editGames, norm]);
+    setGameDraft("");
   };
+
+  /** Captura armada: clic, luego clickea el juego (20s). Sin prisa. */
+  const [armedCapture, setArmedCapture] = useState<boolean>(false);
+  const armedAt = useRef(0);
+  const armCapture = () => {
+    setPickHint(null);
+    armedAt.current = Date.now();
+    setArmedCapture(true);
+  };
+  useEffect(() => {
+    if (!armedCapture) return;
+    let stop = false;
+    const finish = (hint: string) => {
+      setPickHint(hint);
+      setArmedCapture(false);
+    };
+    const id = setInterval(async () => {
+      if (stop) return;
+      if (Date.now() - armedAt.current > 20000) {
+        finish("Timed out — no other app focused.");
+        return;
+      }
+      try {
+        const fg = await invoke<{ exe: string; title: string }>("get_foreground_app");
+        const cand = (fg.exe || "").trim().toLowerCase();
+        if (stop || !cand || cand === "lefty.exe") return;
+        setEditGames((prev) => (prev.includes(cand) ? prev : [...prev, cand]));
+        finish(`Added ${cand} from the game window.`);
+      } catch {
+        /* reintentar en el próximo tick */
+      }
+    }, 500);
+    return () => { stop = true; clearInterval(id); };
+  }, [armedCapture]);
 
   const createProfile = () => {
     // Modo borrador: no se crea nada hasta Save.
     setEditName("");
     setEditIcon(DEFAULT_PROFILE_ICON);
-    setEditAutoApps([]);
-    setAppDraft("");
+    setEditAccent(null);
+    setEditGames([]);
+    setGameDraft("");
+    setShowBrowser(false);
+    setPickHint(null);
+    setEditTab("general");
     setEditProfileId(null);
     setCreatingProfile(true);
     setOpenMenuId(null);
@@ -623,16 +997,21 @@ export default function App() {
     if (!src) return;
     let nid = `${id}_copy`;
     for (let i = 2; nid in profiles; i++) nid = `${id}_copy${i}`;
+    const mappings = src.mappings.map(([s, d]) => [s, d] as Mapping);
+    const games = [...new Set([...(src.autoApps ?? []), ...(src.playApps ?? [])])];
+    const gamesOrUndef = games.length > 0 ? games : undefined;
     const p: Profile = {
       ...src,
       display_name: `${src.display_name} copy`,
-      mappings: src.mappings.map(([s, d]) => [s, d] as Mapping),
-      autoApps: src.autoApps ? [...src.autoApps] : undefined,
+      mappings,
+      autoApps: gamesOrUndef,
+      playApps: gamesOrUndef,
+      disabled: pruneDisabledSources(mappings, src.disabled),
     };
     setProfiles({ ...profiles, [nid]: p });
     setActive(nid);
     setOpenMenuId(null);
-    syncEngine(p.mappings);
+    syncProfile(p);
   };
 
   const confirmDeleteProfile = (id: string) => {    if (Object.keys(profiles).length <= 1) return;
@@ -643,7 +1022,7 @@ export default function App() {
     setOpenMenuId(null);
     if (active === id && ids.length > 0) {
       setActive(ids[0]);
-      syncEngine(next[ids[0]].mappings);
+      syncProfile(next[ids[0]]);
     }
     closeProfileModal();
   };
@@ -655,7 +1034,7 @@ export default function App() {
     const j = i + dir;
     if (i < 0 || j < 0 || j >= ids.length) return;
     [ids[i], ids[j]] = [ids[j], ids[i]];
-    const next: Record<string, Profile> = {};
+    const next: ProfilesMap = {};
     for (const k of ids) next[k] = profiles[k];
     setProfiles(next);
     setOpenMenuId(null);
@@ -710,13 +1089,18 @@ export default function App() {
               const menuOpen = openMenuId === key;
               const canUp = idx > 0;
               const canDown = idx < arr.length - 1;
+              const customAccent = normalizeProfileAccent(p.accent);
+              const customHex = customAccent ? resolveAccent(customAccent).hex : null;
+              const customPainted = customHex && highContrast ? adjustForContrast(customHex) : customHex;
               return (
               <div key={key} className="relative">
                 <button onClick={() => { setActive(key); setOpenMenuId(null); }} className={`w-full text-left p-3 rounded-xl border flex items-center gap-3 ${selected ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant hover:bg-surface-container-highest text-on-surface"}`}>
-                  <span className={`w-8 h-8 grid place-items-center rounded-lg font-medium flex-shrink-0 ${selected ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}><ProfileGlyph icon={p.icon} size={15} /></span>
+                  <span className={`relative w-8 h-8 grid place-items-center rounded-lg font-medium flex-shrink-0 ${selected ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}><ProfileGlyph icon={p.icon} size={15} />
+                    {customPainted && <span title="Custom accent" className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface-container" style={{ backgroundColor: customPainted }} />}
+                  </span>
                   <div className="flex-1 min-w-0 pr-6">
                     <div className={`text-[13px] font-medium leading-none truncate ${selected ? "text-on-primary" : "text-on-surface"}`}>{p.display_name}</div>
-                    <div className={`text-[11px] mt-1 truncate ${selected ? "text-on-primary/80" : "text-on-surface-variant"}`}>{p.mappings.length} mappings{p.autoApps && p.autoApps.length > 0 ? " · auto" : ""}</div>
+                    <div className={`text-[11px] mt-1 truncate ${selected ? "text-on-primary/80" : "text-on-surface-variant"}`}>{p.mappings.length} mappings{((p.autoApps?.length ?? 0) > 0 || (p.playApps?.length ?? 0) > 0) ? " · games" : ""}{customHex ? " · accent" : ""}</div>
                   </div>
                 </button>
                 <button
@@ -786,15 +1170,42 @@ export default function App() {
           <div className="px-6 py-5 border-b border-outline-variant">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-[17px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={16} className="text-on-surface-variant"/> {prof.display_name}</h2>
+                <h2 className="text-[17px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={16} className="text-on-surface-variant"/> {prof.display_name}{autoHeld && !enabled && (<span title="Paused automatically — return to your games or resume manually" className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">AUTO</span>)}</h2>
                 <p className="text-[13px] text-on-surface-variant mt-1.5 leading-relaxed max-w-[560px]">{prof.description}</p>
               </div>
                <button data-tour="add" onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-all duration-150 m3-pressable active:scale-[0.96] hover:scale-[1.02]"><Plus size={15}/> Add</button>
             </div>
           </div>
-          <div className="px-6 py-3 flex items-center justify-between text-[11px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
-            <span>{prof.mappings.length} MAPPINGS</span><span className="font-normal tracking-wide text-outline">SOURCE → TARGET</span>
+          <div className="px-6 py-3 flex items-center justify-between gap-2 text-[11px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
+            <span>{filterQuery ? `${visibleMappings.length} OF ${prof.mappings.length}` : `${prof.mappings.length} MAPPINGS`}{pausedCount > 0 ? ` · ${pausedCount} PAUSED` : ""}</span>
+            <span className="flex items-center gap-2">
+              <button onClick={() => { if (!showFilter) setShowFilter(true); else filterRef.current?.focus(); }} title="Filter mappings" aria-label="Filter mappings" aria-expanded={showFilter} className={`w-7 h-7 grid place-items-center rounded-full transition-colors ${showFilter ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface"}`}>
+                <Search size={13} />
+              </button>
+              <span className="font-normal tracking-wide text-outline hidden md:inline">SOURCE → TARGET</span>
+            </span>
           </div>
+          {showFilter && (
+            <>
+              <div className="fixed inset-0 z-30 cursor-default" onClick={() => { setMapFilter(""); setShowFilter(false); }} />
+              <div className="relative z-40 px-4 sm:px-6 py-2 border-b border-outline-variant bg-surface-container-high flex items-center gap-2 animate-m3-fade-in">
+              <input
+                ref={filterRef}
+                value={mapFilter}
+                onChange={(e) => setMapFilter(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { setMapFilter(""); setShowFilter(false); } }}
+                placeholder="Filter mappings…"
+                aria-label="Filter mappings"
+                className="flex-1 h-8 bg-transparent font-mono text-[13px] text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
+              />
+              {mapFilter && (
+                <button onClick={() => { setMapFilter(""); setShowFilter(false); }} aria-label="Clear filter" className="w-7 h-7 grid place-items-center rounded-full text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+            </>
+          )}
           <div className="flex-1 min-h-0 overflow-auto p-4 space-y-2 bg-surface-container">
             {prof.mappings.length===0 ? (
               <div className="py-20 text-center">
@@ -803,18 +1214,27 @@ export default function App() {
                 <p className="text-[13px] text-on-surface-variant mt-1">Add your first remap to start</p>
                 <button onClick={()=>setShowAdd(true)} className="mt-5 h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium m3-pressable active:scale-[0.96] transition-transform duration-150">Add mapping</button>
               </div>
-            ) : prof.mappings.map(([s, d]) => (
-              <div key={s} className="h-[58px] bg-surface-container-high border border-outline-variant rounded-2xl flex items-center px-4 gap-3">
+            ) : visibleMappings.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-[13px] text-on-surface-variant">No mappings match “{mapFilter.trim()}”</p>
+                <button onClick={() => { setMapFilter(""); setShowFilter(false); }} className="mt-3 h-8 px-4 rounded-full bg-surface-container-high border border-outline-variant text-on-surface text-[12px] font-medium m3-pressable active:scale-[0.97]">Clear filter</button>
+              </div>
+            ) : visibleMappings.map(([s, d]) => {
+              const paused = pausedSrcs.has(s);
+              return (
+              <div key={s} className={`h-[58px] bg-surface-container-high border border-outline-variant rounded-2xl flex items-center px-4 gap-3 ${paused ? "opacity-60" : ""}`}>
                 <span className="px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[76px] text-center text-on-surface">{s}</span>
-                <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center text-[14px] font-medium shadow-m3-1">→</span>
+                <span className={`w-8 h-8 rounded-full grid place-items-center text-[14px] font-medium ${paused ? "bg-surface-container-highest border border-outline-variant text-on-surface-variant" : "bg-primary text-on-primary shadow-m3-1"}`}>→</span>
                 <span className="px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[76px] text-center border border-outline-variant">{d}</span>
-                <span className="hidden sm:block text-[12px] text-on-surface-variant ml-1">remap</span>
+                <span className="hidden sm:block text-[12px] text-on-surface-variant ml-1">{paused ? "paused" : "remap"}</span>
                 <div className="ml-auto flex items-center gap-1.5">
+                  <button onClick={()=>toggleMapping(s)} title={paused ? "Resume this mapping" : "Pause this mapping"} aria-label={paused ? `Resume ${s}` : `Pause ${s}`} aria-pressed={!paused} className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container">{paused ? <Play size={14}/> : <Pause size={14}/>}</button>
                   <button onClick={()=>swapMap(s,d)} title="Swap" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container"><ArrowLeftRight size={14}/></button>
                   <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-primary hover:text-on-primary hover:border-primary transition-colors"><Trash2 size={14}/></button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-end sm:hidden">
             <button data-tour="add" onClick={()=>setShowAdd(true)} className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5"><Plus size={14}/>Add</button>
@@ -823,7 +1243,7 @@ export default function App() {
       </div>
       {(showAdd || closingAdd) && (
         <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 m3-backdrop ${closingAdd ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeAdd}>
-          <div className={`w-full max-w-[540px] bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingAdd ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
+          <div className={`w-full max-w-[540px] max-h-[calc(90vh-2rem)] overflow-y-auto bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingAdd ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shadow-m3-1 shrink-0"><Plus size={18}/></span>
               <div>
@@ -839,7 +1259,7 @@ export default function App() {
                 <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} aria-label="Source key" aria-invalid={!mappingValidation.canSave} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${!mappingValidation.canSave ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
-                <button onClick={()=>setCapturing("src")} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
+                <button onClick={()=>{ setTesting(false); setCapturing("src"); }} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
               </div>
               <div className="flex items-center">
                 <span className="w-9 h-9 rounded-full bg-primary text-on-primary grid place-items-center text-[15px] font-medium shadow-m3-1">→</span>
@@ -850,7 +1270,7 @@ export default function App() {
                 <select value={dstKey} onChange={e=>setDstKey(e.target.value)} aria-label="Target key" aria-invalid={mappingValidation.conflict.kind === "self"} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${mappingValidation.conflict.kind === "self" ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
                   {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
-                <button onClick={()=>setCapturing("dst")} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
+                <button onClick={()=>{ setTesting(false); setCapturing("dst"); }} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
               </div>
             </div>
             <div aria-live="polite" className="min-h-[30px] mt-4">
@@ -859,6 +1279,51 @@ export default function App() {
                   <TriangleAlert size={13} className="flex-shrink-0" />
                   {mappingValidation.message}
                 </p>
+              )}
+            </div>
+            <div className="mt-4 rounded-2xl border border-outline-variant bg-surface-container-high overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  if (testOpen) setTesting(false);
+                  setTestOpen((o) => !o);
+                }}
+                aria-expanded={testOpen}
+                className="w-full flex items-center justify-between gap-2 px-3.5 py-3"
+              >
+                <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">TRY IT · WHAT THE GAME SEES</span>
+                <ChevronDown size={14} className={`text-on-surface-variant transition-transform shrink-0 ${testOpen ? "rotate-180" : ""}`} />
+              </button>
+              {testOpen && (
+                <div className="px-3.5 pb-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-on-surface-variant">Check keys against {prof.display_name} without leaving the app.</p>
+                    <button
+                      onClick={() => {
+                        if (testing) setTesting(false);
+                        else { setCapturing(null); setTesting(true); }
+                      }}
+                      className={`h-8 px-4 rounded-full text-[12px] font-medium m3-pressable active:scale-[0.97] transition-colors shrink-0 ${testing ? "bg-surface-container-highest border border-outline-variant text-on-surface hover:border-primary" : "bg-primary text-on-primary shadow-m3-1"}`}
+                    >
+                      {testing ? "Stop" : "Test"}
+                    </button>
+                  </div>
+                  {testing && !testKey && (
+                    <p className="mt-2.5 text-[12px] font-medium text-on-surface-variant animate-pulse">Press any key…</p>
+                  )}
+                  {testKey && (
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap" aria-live="polite">
+                      <span className="px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[64px] text-center text-on-surface">{testKey}</span>
+                      <span className="w-7 h-7 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium">→</span>
+                      {(() => {
+                        const entry = prof.mappings.find(([s]) => s === testKey);
+                        if (!entry) return <span className="text-[12px] text-on-surface-variant">passes through unchanged</span>;
+                        if (pausedSrcs.has(testKey)) return <span className="text-[12px] text-on-surface-variant">paused in this profile — resume it to use</span>;
+                        return <span className="px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[64px] text-center border border-outline-variant">{entry[1]}</span>;
+                      })()}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex gap-3 mt-4">
@@ -903,22 +1368,54 @@ export default function App() {
         </div>
       )}
       {(creatingProfile || ((editProfileId || closingEdit) && editProfileId && profiles[editProfileId])) && (
-        <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingEdit ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeEditProfile}>
-          <div className={`w-full max-w-[480px] bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingEdit ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
-            <div className="flex items-center gap-3">
+        <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingEdit ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={() => closeEditProfile()}>
+          <div className={`w-full max-w-[480px] h-[min(600px,88vh)] flex flex-col bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingEdit ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center gap-3 shrink-0">
               <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shadow-m3-1 shrink-0"><Pencil size={17}/></span>
               <div>
                 <h3 className="text-[16px] font-display font-semibold text-on-surface leading-none">{creatingProfile ? "New profile" : "Edit profile"}</h3>
                 <p className="text-[11px] text-on-surface-variant mt-1.5">{creatingProfile ? "Design it, Save creates it" : `${profiles[editProfileId ?? ""].mappings.length} mappings · changes apply instantly`}</p>
               </div>
             </div>
-            <div className="mt-4 rounded-2xl border border-outline-variant bg-surface-container-high p-3 flex items-center gap-3">
-              <span className="w-10 h-10 grid place-items-center rounded-xl bg-primary text-on-primary shrink-0 shadow-m3-1"><ProfileGlyph icon={editIcon} size={18} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-medium text-on-surface truncate">{editName.trim() || "…"}</div>
+            <div className="mt-4 text-[10px] font-medium tracking-widest text-on-surface-variant shrink-0">PREVIEW</div>
+            {(() => {
+              // Replica exacta de la fila del sidebar: cómo se verá en la lista.
+              const isActive = !creatingProfile && editProfileId === active;
+              const count = creatingProfile ? 0 : profiles[editProfileId ?? ""]?.mappings.length ?? 0;
+              const accentKey = normalizeProfileAccent(editAccent);
+              const dotHex = accentKey ? resolveAccent(accentKey).hex : null;
+              const painted = dotHex && highContrast ? adjustForContrast(dotHex) : dotHex;
+              return (
+                <div className={`mt-2 w-full text-left p-3 rounded-xl border flex items-center gap-3 shrink-0 ${isActive ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant text-on-surface"}`}>
+                  <span className={`relative w-8 h-8 grid place-items-center rounded-lg font-medium shrink-0 ${isActive ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}>
+                    <ProfileGlyph icon={editIcon} size={15} />
+                    {painted && <span title="Custom accent" className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface-container" style={{ backgroundColor: painted }} />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-[13px] font-medium leading-none truncate ${isActive ? "text-on-primary" : "text-on-surface"}`}>{editName.trim() || "…"}</div>
+                    <div className={`text-[11px] mt-1 truncate ${isActive ? "text-on-primary/80" : "text-on-surface-variant"}`}>{count} mappings{editGames.length > 0 ? " · games" : ""}{painted ? " · accent" : ""}</div>
+                  </div>
+                </div>
+              );
+            })()}
+            <form onSubmit={(e) => { e.preventDefault(); if (editName.trim()) saveEditProfile(); }} className="flex flex-col flex-1 min-h-0">
+              <div className="mt-4 flex gap-1 p-1 rounded-full bg-surface-container-high border border-outline-variant shrink-0" role="tablist" aria-label="Profile sections">
+                {(["general", "appearance", "automation"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={editTab === t}
+                    onClick={() => setEditTab(t)}
+                    className={`flex-1 h-8 rounded-full text-[12px] font-medium capitalize transition-all m3-pressable active:scale-[0.97] ${editTab === t ? "bg-primary text-on-primary shadow-m3-1" : "text-on-surface-variant hover:text-on-surface"}`}
+                  >
+                    {t}
+                  </button>
+                ))}
               </div>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); if (editName.trim()) saveEditProfile(); }}>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+              {editTab === "general" && (
+              <>
               <div className="mt-4 text-[10px] font-medium tracking-widest text-on-surface-variant">ICON</div>
               <div className="mt-2 grid grid-cols-8 gap-1.5 max-h-[132px] overflow-auto" role="radiogroup" aria-label="Profile icon">
                 {PROFILE_ICONS.map(({ name, Icon }) => (
@@ -942,14 +1439,71 @@ export default function App() {
                 aria-label="Profile name"
                 className="mt-2 w-full h-11 rounded-xl bg-surface-container-highest border border-outline-variant text-[13px] font-medium px-3.5 text-on-surface focus:outline-none focus:border-primary transition-colors"
               />
-              <div className="mt-4 text-[10px] font-medium tracking-widest text-on-surface-variant">AUTO-SWITCH</div>
+              </>
+              )}
+              {editTab === "appearance" && (
+              <>
+              <div className="mt-4 text-[10px] font-medium tracking-widest text-on-surface-variant">ACCENT</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Profile accent">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={editAccent === null}
+                  title={`Use global (${accent.name})`}
+                  onClick={() => pickEditAccent(null)}
+                  className={`h-9 px-3 rounded-full border text-[12px] font-medium transition-all m3-pressable active:scale-95 ${editAccent === null ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}
+                >
+                  Global
+                </button>
+                {ACCENT_PRESETS.map((p) => {
+                  const selected = editAccent === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={p.name}
+                      title={p.name}
+                      onClick={() => pickEditAccent(p.id)}
+                      style={{ backgroundColor: p.hex }}
+                      className={`w-9 h-9 rounded-full grid place-items-center border border-outline-variant m3-pressable active:scale-90 transition-transform hover:scale-110 ${selected ? "ring-2 ring-offset-2 ring-offset-surface-container ring-white/80 scale-105" : "opacity-80 hover:opacity-100"}`}
+                    >
+                      {selected && <span style={{ color: contrastOn(p.hex), fontSize: 14, fontWeight: 700 }}>✓</span>}
+                    </button>
+                  );
+                })}
+                <label
+                  title="Custom color"
+                  className={`w-9 h-9 rounded-full grid place-items-center border border-outline-variant cursor-pointer m3-pressable active:scale-90 transition-transform hover:scale-110 ${editAccent !== null && editAccent.startsWith("#") ? "ring-2 ring-offset-2 ring-offset-surface-container ring-white/80 scale-105" : "opacity-80 hover:opacity-100"}`}
+                  style={{ background: "conic-gradient(#EF4444,#F59E0B,#84CC16,#06B6D4,#3B82F6,#8B5CF6,#EC4899,#EF4444)" }}
+                >
+                  <span className="sr-only">Custom color</span>
+                  <input
+                    type="color"
+                    aria-label="Custom profile color"
+                    className="sr-only"
+                    value={editAccent !== null && editAccent.startsWith("#") ? editAccent : accentHex}
+                    onChange={(e) => pickEditAccent(e.target.value.toUpperCase())}
+                  />
+                  <span className="text-[13px] font-bold text-white drop-shadow">·</span>
+                </label>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mt-1.5">
+                {editAccent === null ? `Using global (${accent.name}).` : `Overrides global (${accent.name}) when this profile is active.`} Preview is live.
+              </p>
+              </>
+              )}
+              {editTab === "automation" && (
+              <>
+              <div className="mt-4 text-[10px] font-medium tracking-widest text-on-surface-variant">GAMES</div>
               <div className="mt-2">
-                {editAutoApps.length > 0 && (
+                {editGames.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
-                    {editAutoApps.map((a) => (
+                    {editGames.map((a) => (
                       <span key={a} className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-mono">
                         {a}
-                        <button type="button" onClick={() => setEditAutoApps(editAutoApps.filter((x) => x !== a))} aria-label={`Remove ${a}`} className="w-4 h-4 grid place-items-center rounded-full hover:bg-on-secondary-container/20">
+                        <button type="button" onClick={() => setEditGames(editGames.filter((x) => x !== a))} aria-label={`Remove ${a}`} className="w-4 h-4 grid place-items-center rounded-full hover:bg-on-secondary-container/20">
                           <X size={11} />
                         </button>
                       </span>
@@ -958,26 +1512,54 @@ export default function App() {
                 )}
                 <div className="flex gap-2">
                   <input
-                    value={appDraft}
-                    onChange={(e) => setAppDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAutoApp(); } }}
-                    placeholder="e.g. javaw.exe"
-                    aria-label="App exe or title"
+                    value={gameDraft}
+                    onChange={(e) => setGameDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addGameApp(); } }}
+                    placeholder="e.g. eldenring.exe"
+                    aria-label="Game exe or title"
                     className="flex-1 h-10 rounded-xl bg-surface-container-highest border border-outline-variant text-[12px] font-mono px-3 text-on-surface focus:outline-none focus:border-primary transition-colors"
                   />
-                  <button type="button" onClick={addAutoApp} className="h-10 px-4 rounded-xl bg-surface-container-highest border border-outline-variant text-[12px] font-medium text-on-surface hover:border-primary transition-colors">Add</button>
+                  <button type="button" onClick={addGameApp} className="h-10 px-4 rounded-xl bg-surface-container-highest border border-outline-variant text-[12px] font-medium text-on-surface hover:border-primary transition-colors">Add</button>
                 </div>
-                <p className="text-[11px] text-on-surface-variant mt-1.5">Switch here when one of these apps is focused. Empty = manual only.</p>
+                <p className="text-[11px] text-on-surface-variant mt-1.5">This profile switches and works only here. Empty = manual everywhere.</p>
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => { if (armedCapture) { setArmedCapture(false); setPickHint(null); } else armCapture(); }} title="Arm capture, then click the game" className={`h-8 px-3.5 rounded-full border text-[11px] font-medium transition-colors m3-pressable active:scale-[0.97] ${armedCapture ? "bg-primary text-on-primary border-primary animate-pulse" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}>{armedCapture ? "Click the game… (cancel)" : "Use current app"}</button>
+                  <button type="button" onClick={() => setShowBrowser(true)} title="Browse installed games" className="h-8 px-3.5 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[11px] font-medium hover:border-primary transition-colors m3-pressable active:scale-[0.97]">Browse installed</button>
+                </div>
+                {pickHint && (
+                  <p className="text-[11px] text-on-surface-variant mt-1.5" aria-live="polite">{pickHint}</p>
+                )}
               </div>
-              <div className="flex gap-3 mt-5">
-                <button type="button" onClick={closeEditProfile} className="flex-1 h-12 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[14px] font-medium m3-pressable active:scale-[0.97]">Cancel</button>
+              </>
+              )}
+              </div>
+              <div className="flex gap-3 mt-4 pt-4 border-t border-outline-variant shrink-0">
+                <button type="button" onClick={() => closeEditProfile()} className="flex-1 h-12 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface hover:bg-surface-container-high text-[14px] font-medium m3-pressable active:scale-[0.97]">Cancel</button>
                 <button type="submit" disabled={!editName.trim()} className="flex-1 h-12 rounded-full bg-primary text-on-primary text-[14px] font-medium shadow-m3-1 hover:shadow-m3-2 active:scale-[0.97] m3-pressable transition-all duration-150 hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100">Save changes</button>
               </div>
             </form>
           </div>
         </div>
       )}
-      {showOnboard && <GuidedTour onDone={finishTour} onStepEnter={handleTourStep} />}
+      {showBrowser && (
+        <GameBrowser
+          title="Add game"
+          onPick={(key) => {
+            if (!editGames.includes(key)) setEditGames([...editGames, key]);
+          }}
+          isTaken={(key) => editGames.includes(key)}
+          onClose={() => setShowBrowser(false)}
+        />
+      )}
+      {showOnboard && (
+        <GuidedTour
+          onDone={finishTour}
+          onStepEnter={handleTourStep}
+          profiles={Object.entries(profiles).map(([id, p]) => ({ id, name: p.display_name, icon: p.icon }))}
+          activeId={active}
+          onSelectProfile={(id) => setActive(id)}
+        />
+      )}
       {(showSettings || closingSettings) && (
         <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 m3-backdrop ${closingSettings ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeSettings}>
           <div className={`w-full max-w-[860px] max-h-[90vh] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 flex flex-col overflow-hidden m3-modal ${closingSettings ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
@@ -1007,7 +1589,7 @@ export default function App() {
                   );
                 })}
               </nav>
-              <div className="flex-1 min-h-0 overflow-auto p-4 bg-surface-container min-h-[400px]">
+              <div className="flex-1 h-[min(460px,60vh)] overflow-auto p-4 bg-surface-container">
                 {settingsTab === "general" && (
                   <div className="space-y-3 animate-m3-fade-in">
                     <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
@@ -1068,8 +1650,28 @@ export default function App() {
                   </div>
                 )}
                 {settingsTab === "appearance" && (
-                  <div className="animate-m3-fade-in">
+                  <div className="animate-m3-fade-in space-y-3">
                     <AccentColorSection />
+                    {normalizeProfileAccent(prof.accent) && (
+                      <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-center gap-3">
+                        <span className="w-3 h-3 rounded-full shrink-0 border border-black/20" style={{ backgroundColor: highContrast ? adjustForContrast(resolveAccent(normalizeProfileAccent(prof.accent)!).hex) : resolveAccent(normalizeProfileAccent(prof.accent)!).hex }} />
+                        <p className="flex-1 text-[11px] leading-relaxed text-on-surface-variant">
+                          <span className="font-medium text-on-surface">{prof.display_name}</span> overrides global with its own accent.
+                        </p>
+                        <button
+                          onClick={() => {
+                            const next = { ...profiles };
+                            const cur = { ...next[active] };
+                            delete cur.accent;
+                            next[active] = cur;
+                            setProfiles(next);
+                          }}
+                          className="h-8 px-3.5 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[12px] font-medium hover:border-primary m3-pressable active:scale-[0.98]"
+                        >
+                          Use global
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {settingsTab === "input" && (
@@ -1077,6 +1679,22 @@ export default function App() {
                     <div className="rounded-xl bg-primary-container/20 border border-outline-variant p-3 flex gap-3">
                       <span className="w-8 h-8 rounded-full bg-primary text-on-primary grid place-items-center flex-shrink-0"><Info size={14}/></span>
                       <p className="text-[11px] leading-relaxed text-on-surface-variant"><span className="font-medium text-on-surface">Gaming focus:</span> Sticky/Filter key popups stay silent while mappings are active.</p>
+                    </div>
+                    <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Pause size={16}/></span>
+                        <div className="flex-1">
+                          <div className="text-[13px] font-medium text-on-surface">Auto-play in your games</div>
+                          <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">List games per profile (Edit profile → Games): this profile switches and works only there. Empty list = manual everywhere. Your manual switch always wins.</div>
+                          {autoPause && !Object.values(profiles).some((p) => (p.autoApps?.length ?? 0) > 0 || (p.playApps?.length ?? 0) > 0) && (
+                            <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1.5">Tip: no profile lists games yet — add them in Edit profile → Games.</div>
+                          )}
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer ml-2">
+                          <input type="checkbox" checked={autoPause} onChange={e=>{ const v=e.target.checked; setAutoPause(v); try{localStorage.setItem("lefty_autopause_focus",String(v));}catch{} if (!v) { autoPausedRef.current = false; setAutoHeld(false); if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = undefined; } if (pauseTimer.current) { clearTimeout(pauseTimer.current); pauseTimer.current = undefined; } } }} className="sr-only peer" />
+                          <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
+                        </label>
+                      </div>
                     </div>
                     <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4">
                       <div className="flex items-start gap-3">
@@ -1111,9 +1729,9 @@ export default function App() {
                 {settingsTab === "profiles" && (
                   <div className="animate-m3-fade-in">
                     <ProfileImportExport onProfilesChanged={(p, a) => {
-                      setProfiles(p as typeof profiles);
+                      setProfiles(p);
                       setActive(a);
-                      const m = (p as typeof profiles)[a]?.mappings ?? [];
+                      const m = p[a] ? engineMappings(p[a]) : [];
                       invoke("update_mappings", { mappings: m }).catch(()=>{});
                     }} />
                   </div>

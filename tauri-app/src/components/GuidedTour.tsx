@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { ProfileGlyph } from "../lib/profileIcons";
 
 interface TourStep {
   selector: string;
@@ -64,8 +65,26 @@ function targetRect(selector: string): Rect | null {
   return null;
 }
 
+export interface TourProfile {
+  id: string;
+  name: string;
+  icon: string;
+}
+
 /** Tour guiado con spotlight sobre la UI real. Sin target visible: tarjeta centrada. */
-export default function GuidedTour({ onDone, onStepEnter }: { onDone: () => void; onStepEnter: (step: number) => void }) {
+export default function GuidedTour({
+  onDone,
+  onStepEnter,
+  profiles,
+  activeId,
+  onSelectProfile,
+}: {
+  onDone: () => void;
+  onStepEnter: (step: number) => void;
+  profiles: TourProfile[];
+  activeId: string;
+  onSelectProfile: (id: string) => void;
+}) {
   const [step, setStep] = useState(0);
   // undefined = aún sin medir (no se muestra nada: evita el flash centrado).
   const [rect, setRect] = useState<Rect | null | undefined>(undefined);
@@ -153,6 +172,24 @@ export default function GuidedTour({ onDone, onStepEnter }: { onDone: () => void
         </div>
         <h3 className="text-[16px] font-display font-medium text-on-surface mt-1">{s.title}</h3>
         <p className="text-[13px] leading-relaxed text-on-surface-variant mt-2">{s.text}</p>
+        {step === 0 && profiles.length > 0 && (
+          <div className="grid grid-cols-2 gap-2 mt-3" role="radiogroup" aria-label="Choose layout">
+            {profiles.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={activeId === p.id}
+                onClick={() => onSelectProfile(p.id)}
+                title={p.name}
+                className={`h-11 px-2 rounded-xl border text-[12px] font-medium flex items-center gap-2 transition-colors ${activeId === p.id ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}
+              >
+                <ProfileGlyph icon={p.icon} size={15} />
+                <span className="truncate">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-1.5 mt-4" aria-hidden>
           {STEPS.map((_, i) => (
             <span

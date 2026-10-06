@@ -5,6 +5,8 @@ import { DEFAULT_PROFILE_ICON } from "./profileIcons";
 
 export type Mapping = [string, string];
 
+// Fuente única de Profile/Mapping: App.tsx y el resto de la UI importan
+// estos tipos de aquí (no duplicarlos).
 export type Profile = {
   display_name: string;
   description: string;
@@ -13,6 +15,14 @@ export type Profile = {
   /** Apps para auto-switch (exe o subcadena del título, minúsculas).
    *  Ausente o vacío = solo manual. */
   autoApps?: string[];
+  /** Apps donde el perfil se activa solo (allowlist, misma sintaxis).
+   *  Vacío = manual en todas partes. No lo comparte el switch. */
+  playApps?: string[];
+  /** Acento por perfil: preset id o `#RRGGBB`. Ausente = usar global. */
+  accent?: string;
+  /** Sources en pausa: reservan su source pero no llegan al engine.
+   *  Ausente o vacío = todo activo. No viaja en share codes. */
+  disabled?: string[];
 };
 
 export type ProfilesMap = Record<string, Profile>;
@@ -53,6 +63,43 @@ export function normalizeAutoApps(raw: unknown): string[] | undefined {
   return apps.length > 0 ? apps : undefined;
 }
 
+// Mismo criterio que theme/accent normalizeProfileAccent (duplicado para
+// no arrastrar React/Material a este módulo): preset id o `#RRGGBB`.
+const ACCENT_IDS = new Set([
+  "mono",
+  "emerald",
+  "cyan",
+  "blue",
+  "violet",
+  "pink",
+  "crimson",
+  "orange",
+  "amber",
+  "lime",
+]);
+
+export function normalizeAccent(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim();
+  if (t === "") return undefined;
+  if (ACCENT_IDS.has(t)) return t;
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t.toUpperCase();
+  return undefined;
+}
+
+/** Normaliza sources en pausa: solo conserva los presentes en mappings. */
+export function normalizeDisabled(mappings: Mapping[], raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const srcs = new Set(mappings.map(([s]) => s));
+  const out = [...new Set(
+    raw
+      .filter((x): x is string => typeof x === "string")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && srcs.has(s))
+  )];
+  return out.length > 0 ? out : undefined;
+}
+
 /**
  * Valida un JSON parseado con tolerancia: ignora entradas malformadas y
  * devuelve warnings legibles. Lanza si no hay NI UN perfil válido.
@@ -87,6 +134,10 @@ export function validateProfilesMap(data: unknown): {
       icon: typeof r.icon === "string" && r.icon ? r.icon : DEFAULT_PROFILE_ICON,
       mappings,
       autoApps: normalizeAutoApps(r.autoApps),
+      // Migración pauseApps → playApps (códigos/archivos viejos).
+      playApps: normalizeAutoApps(r.playApps ?? (r as Record<string, unknown>).pauseApps),
+      accent: normalizeAccent(r.accent),
+      disabled: normalizeDisabled(mappings, r.disabled),
     };
   }
   if (Object.keys(profiles).length === 0) {
@@ -98,6 +149,81 @@ export function validateProfilesMap(data: unknown): {
 function persist(profiles: ProfilesMap, active?: string) {
   localStorage.setItem(LS_PROFILES, JSON.stringify(profiles));
   if (active) localStorage.setItem(LS_ACTIVE, active);
+}
+
+// ── Backups automáticos ──────────────────────────────────────────────
+// Snapshot de seguridad antes de cada import/restore. Rotativo: se
+// conservan los últimos MAX_BACKUPS en localStorage ("lefty_backups").
+
+export interface ProfilesBackup {
+  stamp: string;
+  label: string;
+  reason: string;
+  profiles: ProfilesMap;
+  active: string;
+}
+
+const LS_BACKUPS = "lefty_backups";
+const MAX_BACKUPS = 8;
+
+export function listBackups(): ProfilesBackup[] {
+  try {
+    const raw = localStorage.getItem(LS_BACKUPS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (b): b is ProfilesBackup =>
+        !!b && typeof b === "object" &&
+        typeof (b as ProfilesBackup).stamp === "string" &&
+        !!(b as ProfilesBackup).profiles &&
+        typeof (b as ProfilesBackup).profiles === "object"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveBackups(list: ProfilesBackup[]) {
+  try {
+    localStorage.setItem(LS_BACKUPS, JSON.stringify(list.slice(0, MAX_BACKUPS)));
+  } catch {
+    /* cuota llena: el import sigue igual, solo se pierde el snapshot */
+  }
+}
+
+/** Guarda el estado actual como backup. `null` si no hay nada que guardar. */
+export function createBackup(reason: string): ProfilesBackup | null {
+  const profiles = getLocalProfiles();
+  if (!profiles || Object.keys(profiles).length === 0) return null;
+  const active = localStorage.getItem(LS_ACTIVE) ?? Object.keys(profiles)[0] ?? "";
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const label = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())} · ${reason} (${Object.keys(profiles).length} profiles)`;
+  const b: ProfilesBackup = {
+    stamp: `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`,
+    label,
+    reason,
+    profiles,
+    active,
+  };
+  saveBackups([b, ...listBackups()]);
+  return b;
+}
+
+/** Restaura un backup (con snapshot previo del estado actual). `null` si no existe. */
+export function restoreBackup(stamp: string): { profiles: ProfilesMap; active: string } | null {
+  const found = listBackups().find((b) => b.stamp === stamp);
+  if (!found) return null;
+  createBackup("pre-restore");
+  persist(found.profiles, found.active);
+  return { profiles: found.profiles, active: found.active };
+}
+
+export function deleteBackup(stamp: string): ProfilesBackup[] {
+  const next = listBackups().filter((b) => b.stamp !== stamp);
+  saveBackups(next);
+  return next;
 }
 
 /** El archivo importado reemplaza por completo los perfiles locales. */
@@ -132,13 +258,22 @@ export function applyImportedMerge(imported: ProfilesMap): {
     const bySrc = new Map<string, Mapping>(lp.mappings.map((m) => [m[0], cloneMapping(m)]));
     for (const m of rp.mappings) bySrc.set(m[0], cloneMapping(m));
     const autoApps = [...new Set([...(lp.autoApps ?? []), ...(rp.autoApps ?? [])])];
+    const playApps = [...new Set([...(lp.playApps ?? []), ...(rp.playApps ?? [])])];
+    const mergedMappings = [...bySrc.values()];
+    const mergedDisabled = [...new Set([...(lp.disabled ?? []), ...(rp.disabled ?? [])])]
+      .filter((s) => mergedMappings.some(([src]) => src === s));
     merged[id] = {
       ...lp,
       display_name: rp.display_name || lp.display_name,
       description: rp.description || lp.description,
       icon: rp.icon || lp.icon,
-      mappings: [...bySrc.values()],
+      mappings: mergedMappings,
       autoApps: autoApps.length > 0 ? autoApps : undefined,
+      playApps: playApps.length > 0 ? playApps : undefined,
+      // Acento: el importado manda si trae uno; si no, se conserva el local.
+      accent: rp.accent ?? lp.accent,
+      // Pausados: unión podada a los sources supervivientes.
+      disabled: mergedDisabled.length > 0 ? mergedDisabled : undefined,
     };
   }
   const prevActive = localStorage.getItem(LS_ACTIVE);
@@ -243,7 +378,11 @@ const SHARE_PREFIX_V2 = "LFT2.";
 
 /**
  * Empaqueta un perfil en un share code COMPACTO v2:
- * `LFT2.<icon>.<nombreB64>.<s:d,s:d>[.<autos>]` (la descripción se omite).
+ * `LFT2.<icon>.<nombreB64>.<s:d,s:d>[.<autos>[.<@acento>]][.<!juegos>]]` (la descripción se omite).
+ * El acento viaja como segmento extra `@preset` o `@#RRGGBB` y la lista de
+ * juego como `!b64`: las versiones viejas ignoran ambos segmentos y las
+ * nuevas los recuperan.
+ * Los mapeos en pausa (`disabled`) NO viajan: el receptor los recibe todos activos.
  */
 export function encodeShareCode(_id: string, profile: Profile): string {
   const pairs = profile.mappings.map(([s, d]) => `${encKeyName(s)}:${encKeyName(d)}`).join(",");
@@ -254,7 +393,23 @@ export function encodeShareCode(_id: string, profile: Profile): string {
   const autos = (profile.autoApps ?? [])
     .map((a) => a.trim().toLowerCase())
     .filter((a) => a.length > 0);
-  if (autos.length > 0) code += `.${b64urlEncode(autos.join(","))}`;
+  const play = (profile.playApps ?? [])
+    .map((a) => a.trim().toLowerCase())
+    .filter((a) => a.length > 0);
+  const accent = normalizeAccent(profile.accent);
+  if (accent) {
+    const autosB64 = autos.length > 0 ? b64urlEncode(autos.join(",")) : "";
+    code += `.${autosB64}.@${accent}`;
+  } else if (autos.length > 0) {
+    code += `.${b64urlEncode(autos.join(","))}`;
+  }
+  if (play.length > 0) {
+    // Segmentos posicionales: rellenar huecos vacíos para no mover nada.
+    if (accent) code += `.`;
+    else if (autos.length > 0) code += `..`;
+    else code += `...`;
+    code += `!${b64urlEncode(play.join(","))}`;
+  }
   return code;
 }
 
@@ -268,7 +423,20 @@ export function decodeShareCode(code: string): { id: string; profile: Profile } 
 function decodeShareCodeV2(raw: string): { id: string; profile: Profile } {
   const parts = raw.split(".");
   if (parts.length < 4 || parts[0] !== "LFT2") throw new Error("Invalid share code.");
-  const [, icon, nameB64, pairsRaw, autosRaw] = parts;
+  const [, icon, nameB64, pairsRaw] = parts;
+  const rest = parts.slice(4);
+  let autosRaw: string | undefined;
+  let accentRaw: string | undefined;
+  let playRaw: string | undefined;
+  if (rest.length === 1) {
+    if (rest[0].startsWith("@")) accentRaw = rest[0].slice(1);
+    else if (rest[0] !== "") autosRaw = rest[0];
+  } else if (rest.length >= 2) {
+    if (rest[0] !== "" && !rest[0].startsWith("@")) autosRaw = rest[0];
+    if (rest[1].startsWith("@")) accentRaw = rest[1].slice(1);
+    const playSeg = rest[2];
+    if (playSeg && playSeg.startsWith("!")) playRaw = playSeg.slice(1);
+  }
   let display_name: string;
   try {
     display_name = b64urlDecode(nameB64);
@@ -313,6 +481,18 @@ function decodeShareCodeV2(raw: string): { id: string; profile: Profile } {
     }
     const autoApps = normalizeAutoApps(list);
     if (autoApps) p.autoApps = autoApps;
+  }
+  const accent = normalizeAccent(accentRaw);
+  if (accent) p.accent = accent;
+  if (playRaw) {
+    let list: string[];
+    try {
+      list = b64urlDecode(playRaw).split(",");
+    } catch {
+      throw new Error("Invalid share code (bad play apps).");
+    }
+    const playApps = normalizeAutoApps(list);
+    if (playApps) p.playApps = playApps;
   }
   return { id, profile: p };
 }

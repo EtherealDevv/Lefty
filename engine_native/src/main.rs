@@ -29,6 +29,18 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 static MAIN_DONE: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEY_VK: AtomicU32 = AtomicU32::new(0x75);
+// Antirrebote del hotkey: el auto-repeat del teclado genera KEYDOWN
+// repetidos al mantenerlo pulsado; sin esto conmuta en ráfaga.
+static LAST_HOTKEY_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+const HOTKEY_DEBOUNCE_MS: u64 = 400;
+
+#[inline(always)]
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 // Telemetría de latencia hook→inyección (solo remapeos): QPC + acumuladores
 // lock-free. Overhead por tecla <0.1µs. Un hilo la vuelca a JSON cada segundo.
 static LAT_QPF: AtomicU64 = AtomicU64::new(0);
@@ -87,6 +99,11 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
 
     let hotkey = HOTKEY_VK.load(Ordering::Relaxed);
     if vk_raw == hotkey && (w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize) {
+        let now = now_ms();
+        if now.wrapping_sub(LAST_HOTKEY_TOGGLE_MS.load(Ordering::Relaxed)) < HOTKEY_DEBOUNCE_MS {
+            return LRESULT(1);
+        }
+        LAST_HOTKEY_TOGGLE_MS.store(now, Ordering::Relaxed);
         let new_val = !ENABLED.load(Ordering::Relaxed);
         ENABLED.store(new_val, Ordering::Relaxed);
         if let Ok(appdata) = env::var("APPDATA") {

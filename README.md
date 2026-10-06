@@ -13,13 +13,17 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 
 - **WASD → IJKL** (or arrows, numpad) for left-hand movement
 - Map any key to any other: `I→W`, `Q→U`, `Caps→Ctrl`, `Win→Disabled`
-- Profiles you can create, rename, duplicate, reorder and delete (Lucide icons)
-- Per-game auto-switch: jump to a profile when its app is focused
+- Profiles you can create, rename, duplicate, reorder and delete (Lucide icons, tabbed editor)
+- Games list per profile: auto-switches and works only in your games (empty = manual)
+- Game recommendations: browse installed Steam/Epic games with covers, or capture the app in focus
+- Pause individual mappings without deleting them
 - Add-mapping validation: duplicate sources and self-maps are blocked inline
-- Accent Color themes: 10 presets + custom picker (Settings → Appearance)
-- Share profiles with compact codes (`⋯ → Share`), import by pasting
+- Live key tester: see what the game receives before saving
+- Accent Color themes: 10 presets + custom picker, per-profile override, high-contrast mode (Settings → Appearance)
+- Share profiles with compact codes (`⋯ → Share`), review before importing, automatic backups
 - Interface sounds: distinct chimes for activate vs pause (Settings → General)
 - Gaming focus: Sticky/Filter key popups stay silent while active
+- Tray menu: switch profiles and pause/resume without opening the window
 - Launch options: autostart, start minimized, start active
 - Update checker + guided tour included
 - Tabbed Settings: General, Appearance, Input, Profiles, About
@@ -59,7 +63,7 @@ cd Lefty
 # Run
 .\dist\Lefty.exe
 # Or install
-.\dist\Lefty_1.4.0_x64-setup.exe
+.\dist\Lefty_1.5.0_x64-setup.exe
 ```
 
 > Run as **Administrator** for games that run elevated.
@@ -73,7 +77,7 @@ cd Lefty
 | **Numpad 8456** | `8→W, 4→A, 5→S, 6→D` + digits |
 | **OKL; Mirror** | `O→W, K→A, L→S, ;→D` + mirror |
 
-Create your own with `+` (rename, icon, auto-switch and reorder from `⋯`).
+Create your own with `+` (rename, icon, accent and games from tabs, reorder from `⋯`).
 
 ## Usage
 

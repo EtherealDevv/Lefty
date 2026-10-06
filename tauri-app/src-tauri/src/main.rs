@@ -553,6 +553,62 @@ struct LatencyStats {
 
 /// Latencia hook→inyección medida dentro del engine (ventana de 1 s).
 /// Sin engine o sin teclas recientes devuelve ceros (la UI lo muestra como idle).
+/// Entrada de perfil para el menú del tray (id + nombre visible).
+#[derive(serde::Deserialize)]
+struct TrayProfile {
+    id: String,
+    name: String,
+}
+
+/// Reconstruye el menú del tray: Show, pause/resume, perfiles (checked el
+/// activo) y Close. Lo llama el frontend ante perfiles/activo/enabled.
+#[tauri::command]
+fn update_tray_menu(
+    app: tauri::AppHandle,
+    profiles: Vec<TrayProfile>,
+    active: String,
+    enabled: bool,
+) -> Result<String, String> {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    use tauri::Manager;
+    let show = MenuItem::with_id(&app, "show", "Show", true, None::<&str>).map_err(|e| e.to_string())?;
+    let toggle = MenuItem::with_id(
+        &app,
+        "toggle",
+        if enabled { "Pause mappings" } else { "Activate mappings" },
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(&app, "quit", "Close", true, None::<&str>).map_err(|e| e.to_string())?;
+    let sep1 = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
+    let sep2 = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
+    let mut checks: Vec<CheckMenuItem<tauri::Wry>> = Vec::with_capacity(profiles.len());
+    for p in &profiles {
+        let label = if p.name.trim().is_empty() { p.id.clone() } else { p.name.clone() };
+        checks.push(
+            CheckMenuItem::with_id(&app, format!("profile:{}", p.id), label, true, p.id == active, None::<&str>)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    let mut refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&show, &toggle, &sep1];
+    for c in &checks {
+        refs.push(c);
+    }
+    refs.push(&sep2);
+    refs.push(&quit);
+    let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
+    if let Some(tray) = app.tray_by_id("lefty-tray") {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+        let active_name = profiles
+            .iter()
+            .find(|p| p.id == active)
+            .map(|p| p.name.as_str())
+            .unwrap_or("Lefty");
+        let _ = tray.set_tooltip(Some(format!("Lefty v2 — {} (F6 toggle)", active_name)));
+    }
+    Ok("tray menu updated".into())
+}
 /// App en primer plano (exe + título) para el auto-switch de perfiles.
 /// Solo lectura, sin enforcement: el engine siempre aplica el perfil activo.
 #[derive(serde::Serialize)]
@@ -561,6 +617,150 @@ struct ForegroundApp {
     title: String,
 }
 
+/// Juego detectado para recomendar (nombre bonito + exe para matchear + arte).
+#[derive(serde::Serialize)]
+struct FoundGame {
+    source: String,
+    name: String,
+    exe: String,
+    art: String,
+}
+
+/// Extrae `"clave"  "valor"` de una línea VDF/ACF. Formato: `"k"  "v"`.
+fn vdf_value(text: &str, key: &str) -> Option<String> {
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('"').collect();
+        if parts.len() >= 5 && parts[1] == key {
+            return Some(parts[3].replace("\\\\", "\\"));
+        }
+    }
+    None
+}
+
+/// Steam: librerías desde libraryfolders.vdf + manifests. Sin deps extras.
+/// El arte sale del CDN público por appid (sin API key).
+#[tauri::command]
+fn scan_steam_games() -> Vec<FoundGame> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        roots.push(PathBuf::from(pf86).join("Steam"));
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let p = PathBuf::from(pf).join("Steam");
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    }
+    let mut libs: Vec<PathBuf> = Vec::new();
+    for root in &roots {
+        if !libs.contains(root) {
+            libs.push(root.clone());
+        }
+        let vdf = root.join("steamapps").join("libraryfolders.vdf");
+        if let Ok(text) = std::fs::read_to_string(&vdf) {
+            for line in text.lines() {
+                let parts: Vec<&str> = line.split('"').collect();
+                if parts.len() >= 5 && parts[1] == "path" {
+                    let p = PathBuf::from(parts[3].replace("\\\\", "\\"));
+                    if !libs.contains(&p) {
+                        libs.push(p);
+                    }
+                }
+            }
+        }
+    }
+    let mut out: Vec<FoundGame> = Vec::new();
+    for lib in libs {
+        let dir = lib.join("steamapps");
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("appmanifest_") || !name.ends_with(".acf") {
+                continue;
+            }
+            let appid: String = name
+                .trim_start_matches("appmanifest_")
+                .trim_end_matches(".acf")
+                .to_string();
+            if appid.is_empty() || !appid.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let text = match std::fs::read_to_string(entry.path()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if let Some(game) = vdf_value(&text, "name") {
+                if game.trim().is_empty() {
+                    continue;
+                }
+                // Evita duplicados (misma appid en varias vistas).
+                if out.iter().any(|g: &FoundGame| g.source == "steam" && g.art.ends_with(&format!("/{}/header.jpg", appid))) {
+                    continue;
+                }
+                out.push(FoundGame {
+                    source: "steam".into(),
+                    name: game,
+                    exe: String::new(),
+                    art: format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg", appid),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+/// Epic: manifiestos JSON con DisplayName + LaunchExecutable. Sin deps extras.
+#[tauri::command]
+fn scan_epic_games() -> Vec<FoundGame> {
+    let base = match std::env::var("ProgramData") {
+        Ok(pd) => PathBuf::from(pd).join("Epic").join("EpicGamesLauncher").join("Data").join("Manifests"),
+        Err(_) => return Vec::new(),
+    };
+    let entries = match std::fs::read_dir(&base) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<FoundGame> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("item") {
+            continue;
+        }
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let v: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let name = v.get("DisplayName").and_then(|x| x.as_str()).unwrap_or("").trim();
+        if name.is_empty() {
+            continue;
+        }
+        let exe = v
+            .get("LaunchExecutable")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .replace('/', "\\");
+        let exe = exe.rsplit('\\').next().unwrap_or("").to_lowercase();
+        if out.iter().any(|g: &FoundGame| g.source == "epic" && g.name == name) {
+            continue;
+        }
+        out.push(FoundGame {
+            source: "epic".into(),
+            name: name.to_string(),
+            exe,
+            art: String::new(),
+        });
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
 #[tauri::command]
 fn get_foreground_app() -> Result<ForegroundApp, String> {
     unsafe {
@@ -1011,6 +1211,14 @@ fn main() {
                             let _ = window.set_focus();
                         }
                     }
+                    "toggle" => {
+                        use tauri::Emitter;
+                        let _ = app.emit("tray-toggle", ());
+                    }
+                    id if id.starts_with("profile:") => {
+                        use tauri::Emitter;
+                        let _ = app.emit("tray-switch-profile", &id["profile:".len()..]);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -1044,7 +1252,7 @@ fn main() {
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, get_app_version, open_external_url])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, scan_steam_games, scan_epic_games, get_app_version, open_external_url, update_tray_menu])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
