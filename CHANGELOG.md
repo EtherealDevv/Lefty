@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.1 — 2026-10-06
+- Hotfix: offline-first fonts (blank window without internet fixed)
+
 ## 1.7.0 — 2026-10-06
 - In-app updater: notice banner, release notes, download and install without a browser
 - Combo hold semantics: hold to hold (PTT-ready), auto-repeat ignored, anti-stuck failsafes

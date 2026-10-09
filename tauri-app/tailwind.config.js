@@ -73,9 +73,11 @@ export default {
         shadow: "var(--md-sys-color-shadow)",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        display: ["Outfit", "Inter", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
+        // Offline-first: nombres primero (si el usuario los tiene),
+        // luego pila del sistema. Cero descargas, cero bloqueo sin red.
+        sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        display: ["Outfit", "Inter", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        mono: ["JetBrains Mono", "Cascadia Code", "Consolas", "monospace"],
       },
       borderRadius: {
         none: "var(--md-sys-shape-corner-none)",
