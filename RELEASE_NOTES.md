@@ -14,6 +14,7 @@ Night City has a new left-handed layout.
 
 - Native engine rebuilt with LTO, `opt-level=3`, one codegen unit, `panic=abort` and stripped symbols; the engine binary is ~22% smaller.
 - Hot path trimmed: fewer allocations and `SendInput` calls, stack-based key-up batches and per-key injection tracking.
+- Latencia hook→inyección medida localmente: ~0.07 ms (70 µs) promedio; sin regresión medible frente a v1.7.1.
 - Pausing, remapping or shutting down only releases keys injected by Lefty; physically held keys are never released.
 - Mapping reloads are guarded by a sequence check, so a keydown can't use a stale map or leave a target held.
 - Removed the unused `notify` file-watcher dependency.

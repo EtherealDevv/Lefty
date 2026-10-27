@@ -8,6 +8,7 @@
 - Theme choice persists across restarts; per-profile accent previews preserve the active theme
 - Engine: LTO, opt-level=3, one codegen unit, panic=abort and stripped symbols; ~22% smaller binary
 - Engine hot path: fewer allocations and SendInput calls, stack key-up batches, per-key injection tracking
+- Latencia hook→inyección: ~0.07 ms (70 µs) promedio en pruebas locales; sin regresión frente a 1.7.1
 - Pause/reload/shutdown only releases keys injected by Lefty; mapping reloads are sequence-guarded
 - Removed unused notify dependency; faster combo lookup and async backend work
 - Visual: bundled Inter/Outfit/JetBrains Mono; Material UI title bar, clipping, spacing and contrast polish
