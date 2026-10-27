@@ -6,6 +6,11 @@
 - Cyberpunk keeps the existing layout, spacing and overlay structure; only the visual language changes
 - Cyberpunk uses its own palette, so accent color and high-contrast controls are paused while it is active
 - Theme choice persists across restarts; per-profile accent previews preserve the active theme
+- Engine: LTO, opt-level=3, one codegen unit, panic=abort and stripped symbols; ~22% smaller binary
+- Engine hot path: fewer allocations and SendInput calls, stack key-up batches, per-key injection tracking
+- Pause/reload/shutdown only releases keys injected by Lefty; mapping reloads are sequence-guarded
+- Removed unused notify dependency; faster combo lookup and async backend work
+- Visual: bundled Inter/Outfit/JetBrains Mono; Material UI title bar, clipping, spacing and contrast polish
 - Capri easter egg
 - Includes the 1.7.2 mouse inversion lifecycle fix: inversion stays active while Lefty runs in the tray, and is restored on full exit, shutdown/restart or restart-as-admin
 

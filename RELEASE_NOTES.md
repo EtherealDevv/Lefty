@@ -8,8 +8,22 @@ Night City has a new left-handed layout.
 - **Material UI** is the new display name for the default theme (the visual theme and saved settings are unchanged).
 - Cyberpunk keeps the existing layout, spacing and overlay structure; only the visual language changes.
 - Theme choice persists across restarts.
-- Includes the mouse inversion lifecycle fix: inversion stays active while Lefty runs in the tray and is restored on full exit, shutdown/restart or restart-as-admin.
 - Capri easter egg.
+
+### Backend & performance
+
+- Native engine rebuilt with LTO, `opt-level=3`, one codegen unit, `panic=abort` and stripped symbols; the engine binary is ~22% smaller.
+- Hot path trimmed: fewer allocations and `SendInput` calls, stack-based key-up batches and per-key injection tracking.
+- Pausing, remapping or shutting down only releases keys injected by Lefty; physically held keys are never released.
+- Mapping reloads are guarded by a sequence check, so a keydown can't use a stale map or leave a target held.
+- Removed the unused `notify` file-watcher dependency.
+- Faster combo lookup and async backend work keep the UI responsive.
+- Mouse inversion lifecycle: stays active while Lefty runs in the tray and is restored on full exit, shutdown/restart or restart-as-admin.
+
+### Visual fixes
+
+- Bundled Inter, Outfit and JetBrains Mono locally for consistent typography and no fallback/blank text without internet.
+- Material UI polish: title bar/logo rendering, clipped corners, spacing, contrast and dialog layout.
 
 ### Install
 
