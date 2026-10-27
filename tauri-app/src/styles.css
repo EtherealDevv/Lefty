@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fonts bundled with the app (SIL OFL). No Google Fonts, no network. */
+@font-face {
+  font-family: "Outfit";
+  src: url("./assets/fonts/outfit-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
 /* M3 Expressive 2025 — Shape / Motion / Typography (monochrome #121212) */
 :root {
   color-scheme: dark;
@@ -33,12 +55,12 @@
   --md-sys-motion-duration-long1: 450ms;
   --md-sys-motion-duration-long2: 500ms;
 
-  /* Typography — Expressive */
-  --md-sys-typescale-display-large-font: "Outfit", Inter, system-ui, sans-serif;
-  --md-sys-typescale-title-large-font: "Outfit", Inter, system-ui, sans-serif;
+  /* Typography — Expressive (all faces ship inside the executable) */
+  --md-sys-typescale-display-large-font: "Outfit", "Inter", system-ui, sans-serif;
+  --md-sys-typescale-title-large-font: "Outfit", "Inter", system-ui, sans-serif;
   --md-sys-typescale-body-large-font: "Inter", system-ui, sans-serif;
   --md-sys-typescale-label-large-font: "Inter", system-ui, sans-serif;
-  --md-sys-typescale-code-font: "JetBrains Mono", monospace;
+  --md-sys-typescale-code-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 }
 
 /* Base — use M3 surface tokens injected by materialYouExpressive.ts */
@@ -46,12 +68,17 @@ html, body {
   background: var(--md-sys-color-surface-dim, #121212);
   color: var(--md-sys-color-on-surface, #E6E1EC);
   font-family: var(--md-sys-typescale-body-large-font);
+  font-optical-sizing: auto;
+  font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 * { font-family: inherit; }
-h1, h2, h3, .font-display { font-family: var(--md-sys-typescale-display-large-font); letter-spacing: -0.02em; }
+h1, h2, h3, .font-display {
+  font-family: var(--md-sys-typescale-display-large-font);
+  letter-spacing: -0.02em;
+}
 code, pre, .font-mono { font-family: var(--md-sys-typescale-code-font); }
 
 /* Scrollbar — M3 outline variant */
@@ -103,4 +130,768 @@ code, pre, .font-mono { font-family: var(--md-sys-typescale-code-font); }
     transform 150ms var(--md-sys-motion-easing-emphasized),
     opacity 150ms var(--md-sys-motion-easing-standard),
     box-shadow 200ms var(--md-sys-motion-easing-standard);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   CYBERPUNK THEME
+   Layer on top of M3: palette, typography, angular controls and HUD
+   details. The app grid, spacing and overlay structure stay intact.
+   ──────────────────────────────────────────────────────────────── */
+[data-lefty-theme="cyberpunk"] {
+  color-scheme: dark;
+  accent-color: #FCE300;
+
+  --cyber-yellow: #FCE300;
+  --cyber-cyan: #00F0FF;
+  --cyber-pink: #FF2A6D;
+  --cyber-black: #05060A;
+
+  /* Expressive corners → sharp, cut HUD panels. */
+  --md-sys-shape-corner-extra-small: 2px;
+  --md-sys-shape-corner-small: 2px;
+  --md-sys-shape-corner-medium: 2px;
+  --md-sys-shape-corner-large: 2px;
+  --md-sys-shape-corner-extra-large: 2px;
+  --md-sys-shape-corner-full: 2px;
+
+  /* Monospace is reserved for titles, labels and controls. */
+  --md-sys-typescale-display-large-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --md-sys-typescale-title-large-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --md-sys-typescale-label-large-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+[data-lefty-theme="cyberpunk"] .app-shell {
+  background-color: var(--cyber-black) !important;
+  background-image:
+    radial-gradient(circle at 12% 6%, rgba(252, 227, 0, 0.08), transparent 28%),
+    radial-gradient(circle at 88% 8%, rgba(255, 42, 109, 0.12), transparent 32%),
+    radial-gradient(circle at 50% 110%, rgba(0, 240, 255, 0.07), transparent 42%),
+    linear-gradient(rgba(0, 240, 255, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.032) 1px, transparent 1px);
+  background-size: auto, auto, auto, 36px 36px, 36px 36px;
+}
+
+[data-lefty-theme="cyberpunk"] .app-ambient {
+  background:
+    linear-gradient(118deg, transparent 0 46%, rgba(0, 240, 255, 0.055) 46% 46.35%, transparent 46.35% 100%),
+    linear-gradient(62deg, transparent 0 72%, rgba(255, 42, 109, 0.07) 72% 72.22%, transparent 72.22% 100%),
+    radial-gradient(circle at 18% 0%, rgba(252, 227, 0, 0.08), transparent 34%),
+    radial-gradient(circle at 82% 100%, rgba(255, 42, 109, 0.13), transparent 46%) !important;
+  opacity: 1 !important;
+}
+
+/* Main HUD panels: sharp corners, cyan edge, faint grid and brackets. */
+[data-lefty-theme="cyberpunk"] header > div,
+[data-lefty-theme="cyberpunk"] aside,
+[data-lefty-theme="cyberpunk"] main,
+[data-lefty-theme="cyberpunk"] .m3-modal {
+  position: relative;
+  border-radius: 2px !important;
+  border-color: rgba(0, 240, 255, 0.34) !important;
+  background-image:
+    linear-gradient(rgba(0, 240, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.022) 1px, transparent 1px);
+  background-size: 24px 24px;
+  box-shadow: inset 0 0 0 1px rgba(252, 227, 0, 0.045), 0 0 26px rgba(0, 240, 255, 0.07) !important;
+}
+
+/* Only panels without fixed-position children get the cut-corner clip:
+   aside/main contain click-outside backdrops that must cover the viewport. */
+[data-lefty-theme="cyberpunk"] header > div,
+[data-lefty-theme="cyberpunk"] .m3-modal {
+  clip-path: polygon(
+    0 0,
+    calc(100% - 18px) 0,
+    100% 18px,
+    100% 100%,
+    18px 100%,
+    0 calc(100% - 18px)
+  );
+}
+
+[data-lefty-theme="cyberpunk"] header > div {
+  border-top-color: rgba(252, 227, 0, 0.62) !important;
+}
+
+[data-lefty-theme="cyberpunk"] header > div::before,
+[data-lefty-theme="cyberpunk"] header > div::after,
+[data-lefty-theme="cyberpunk"] aside::before,
+[data-lefty-theme="cyberpunk"] aside::after,
+[data-lefty-theme="cyberpunk"] main::before,
+[data-lefty-theme="cyberpunk"] main::after,
+[data-lefty-theme="cyberpunk"] .m3-modal::before,
+[data-lefty-theme="cyberpunk"] .m3-modal::after {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+[data-lefty-theme="cyberpunk"] header > div::before,
+[data-lefty-theme="cyberpunk"] aside::before,
+[data-lefty-theme="cyberpunk"] main::before,
+[data-lefty-theme="cyberpunk"] .m3-modal::before {
+  top: 6px;
+  left: 6px;
+  border-top: 2px solid var(--cyber-yellow);
+  border-left: 2px solid var(--cyber-yellow);
+  filter: drop-shadow(0 0 5px rgba(252, 227, 0, 0.5));
+}
+
+[data-lefty-theme="cyberpunk"] header > div::after,
+[data-lefty-theme="cyberpunk"] aside::after,
+[data-lefty-theme="cyberpunk"] main::after,
+[data-lefty-theme="cyberpunk"] .m3-modal::after {
+  right: 6px;
+  bottom: 6px;
+  border-right: 2px solid var(--cyber-cyan);
+  border-bottom: 2px solid var(--cyber-cyan);
+  filter: drop-shadow(0 0 5px rgba(0, 240, 255, 0.5));
+}
+
+/* Every rounded utility becomes a tight, industrial corner. */
+[data-lefty-theme="cyberpunk"] [class*="rounded-"] {
+  border-radius: 2px !important;
+}
+
+/* Buttons: clipped corners, monospace uppercase labels and neon focus. */
+[data-lefty-theme="cyberpunk"] button {
+  border-radius: 2px !important;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
+}
+
+[data-lefty-theme="cyberpunk"] button:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+[data-lefty-theme="cyberpunk"] button[class*="bg-primary"] {
+  box-shadow: 0 0 18px rgba(252, 227, 0, 0.16);
+}
+
+[data-lefty-theme="cyberpunk"] button:focus-visible,
+[data-lefty-theme="cyberpunk"] [role="switch"]:focus-visible {
+  outline: 1px solid var(--cyber-cyan);
+  outline-offset: 2px;
+}
+
+[data-lefty-theme="cyberpunk"] [role="switch"]:focus-visible {
+  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.45), inset 0 0 0 1px rgba(0, 240, 255, 0.16) !important;
+}
+
+[data-lefty-theme="cyberpunk"] [role="switch"] {
+  border-radius: 2px !important;
+  border-color: rgba(0, 240, 255, 0.34) !important;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    10px 100%,
+    0 calc(100% - 10px)
+  );
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, 0.16), 0 0 18px rgba(0, 240, 255, 0.06);
+}
+
+[data-lefty-theme="cyberpunk"] [role="switch"] > span {
+  border-radius: 2px !important;
+}
+
+/* Toggles: square rails and blocky knobs. */
+[data-lefty-theme="cyberpunk"] .peer + div {
+  border-radius: 2px !important;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 6px) 0,
+    100% 6px,
+    100% 100%,
+    6px 100%,
+    0 calc(100% - 6px)
+  );
+}
+
+[data-lefty-theme="cyberpunk"] .peer + div::before {
+  border-radius: 1px !important;
+}
+
+/* Inputs and selects: dark terminals with cyan rails. */
+[data-lefty-theme="cyberpunk"] input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+[data-lefty-theme="cyberpunk"] select,
+[data-lefty-theme="cyberpunk"] textarea {
+  border-radius: 2px !important;
+  border-color: rgba(0, 240, 255, 0.3) !important;
+  background-color: #0B0E15 !important;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+[data-lefty-theme="cyberpunk"] input:not([type="checkbox"]):not([type="color"]):not([type="range"]):focus,
+[data-lefty-theme="cyberpunk"] select:focus,
+[data-lefty-theme="cyberpunk"] textarea:focus {
+  border-color: var(--cyber-yellow) !important;
+  box-shadow: 0 0 0 1px rgba(252, 227, 0, 0.55), 0 0 18px rgba(252, 227, 0, 0.12) !important;
+  outline: none;
+}
+
+/* Typography: display faces become terminal-style headers. */
+[data-lefty-theme="cyberpunk"] h1,
+[data-lefty-theme="cyberpunk"] h2,
+[data-lefty-theme="cyberpunk"] h3,
+[data-lefty-theme="cyberpunk"] .font-display {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 18px rgba(0, 240, 255, 0.1);
+}
+
+[data-lefty-theme="cyberpunk"] header h1 {
+  color: var(--cyber-yellow) !important;
+  text-shadow:
+    2px 0 0 rgba(255, 42, 109, 0.7),
+    -2px 0 0 rgba(0, 240, 255, 0.7),
+    0 0 22px rgba(252, 227, 0, 0.25);
+}
+
+[data-lefty-theme="cyberpunk"] header h1 + span {
+  color: var(--cyber-yellow);
+  border-color: rgba(252, 227, 0, 0.4);
+}
+
+[data-lefty-theme="cyberpunk"] [class*="tracking-widest"] {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* Keep sentence-case descriptions readable inside large card buttons. */
+[data-lefty-theme="cyberpunk"] button p,
+[data-lefty-theme="cyberpunk"] button .text-on-surface-variant {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+[data-lefty-theme="cyberpunk"] button .tracking-widest {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Borders and card surfaces pick up the Night City edge light. */
+[data-lefty-theme="cyberpunk"] .border-outline-variant {
+  border-color: rgba(0, 240, 255, 0.2) !important;
+}
+
+[data-lefty-theme="cyberpunk"] .border-outline {
+  border-color: rgba(0, 240, 255, 0.42) !important;
+}
+
+[data-lefty-theme="cyberpunk"] .bg-surface-container-high {
+  background-image: linear-gradient(135deg, rgba(0, 240, 255, 0.035), transparent 42%);
+}
+
+[data-lefty-theme="cyberpunk"] .m3-backdrop {
+  background-color: rgba(2, 6, 10, 0.82) !important;
+}
+
+[data-lefty-theme="cyberpunk"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.42);
+  border-radius: 0;
+}
+
+[data-lefty-theme="cyberpunk"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--cyber-yellow);
+}
+
+[data-lefty-theme="cyberpunk"] ::selection {
+  background: var(--cyber-yellow);
+  color: var(--cyber-black);
+}
+
+/* Night City triad: yellow = action, cyan = structure, magenta = hot accent. */
+[data-lefty-theme="cyberpunk"] header h1 + span {
+  color: var(--cyber-pink) !important;
+  border-color: rgba(255, 42, 109, 0.55) !important;
+  background: rgba(255, 42, 109, 0.08);
+  box-shadow: 0 0 12px rgba(255, 42, 109, 0.12);
+}
+
+[data-lefty-theme="cyberpunk"] header h1 + span.border-outline-variant {
+  border-color: rgba(255, 42, 109, 0.55) !important;
+}
+
+[data-lefty-theme="cyberpunk"] header > div::after {
+  border-right-color: var(--cyber-pink);
+  border-bottom-color: var(--cyber-pink);
+  filter: drop-shadow(0 0 5px rgba(255, 42, 109, 0.55));
+}
+
+[data-lefty-theme="cyberpunk"] [role="switch"][aria-checked="false"] > span:first-child {
+  background: var(--cyber-pink) !important;
+  box-shadow: 0 0 18px rgba(255, 42, 109, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.14) !important;
+}
+
+[data-lefty-theme="cyberpunk"] aside .profile-card:hover {
+  border-color: rgba(255, 42, 109, 0.5) !important;
+}
+
+[data-lefty-theme="cyberpunk"] aside .profile-card[class*="bg-primary"] .profile-glyph {
+  background: var(--cyber-pink) !important;
+  color: var(--cyber-black) !important;
+  box-shadow: 0 0 14px rgba(255, 42, 109, 0.25);
+}
+
+[data-lefty-theme="cyberpunk"] button[aria-label="New profile"] {
+  border-color: rgba(255, 42, 109, 0.45) !important;
+  color: var(--cyber-pink) !important;
+}
+
+[data-lefty-theme="cyberpunk"] button[aria-label="New profile"]:hover {
+  background: var(--cyber-pink) !important;
+  border-color: var(--cyber-pink) !important;
+  color: var(--cyber-black) !important;
+}
+
+[data-lefty-theme="cyberpunk"] button[aria-label="Settings"]:hover {
+  border-color: rgba(255, 42, 109, 0.5) !important;
+  color: var(--cyber-pink) !important;
+  box-shadow: 0 0 18px rgba(255, 42, 109, 0.16);
+}
+
+[data-lefty-theme="cyberpunk"] nav[aria-label="Settings sections"] button:not([aria-current="true"]):hover {
+  border-color: rgba(255, 42, 109, 0.38) !important;
+  color: var(--cyber-pink) !important;
+}
+
+[data-lefty-theme="cyberpunk"] .mapping-source {
+  background: var(--cyber-yellow) !important;
+  border-color: rgba(252, 227, 0, 0.62) !important;
+  color: var(--cyber-black) !important;
+  box-shadow: 0 0 12px rgba(252, 227, 0, 0.1);
+}
+
+[data-lefty-theme="cyberpunk"] .mapping-arrow {
+  background: rgba(0, 240, 255, 0.16) !important;
+  border: 1px solid rgba(0, 240, 255, 0.55) !important;
+  color: var(--cyber-cyan) !important;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.12);
+}
+
+[data-lefty-theme="cyberpunk"] .mapping-target {
+  background: rgba(255, 42, 109, 0.16) !important;
+  border-color: rgba(255, 42, 109, 0.5) !important;
+  color: #FFC2D6 !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 42, 109, 0.08);
+}
+
+[data-lefty-theme="cyberpunk"] .mapping-row:hover {
+  border-color: rgba(255, 42, 109, 0.35) !important;
+}
+
+[data-lefty-theme="cyberpunk"] .mapping-delete:hover {
+  background: var(--cyber-pink) !important;
+  border-color: var(--cyber-pink) !important;
+  color: var(--cyber-black) !important;
+  box-shadow: 0 0 14px rgba(255, 42, 109, 0.22);
+}
+
+[data-lefty-theme="cyberpunk"] .auto-badge {
+  color: var(--cyber-pink) !important;
+  border-color: rgba(255, 42, 109, 0.5) !important;
+  background: rgba(255, 42, 109, 0.08);
+}
+
+[data-lefty-theme="cyberpunk"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--cyber-pink);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   CAPRI EASTER EGG
+   Only reachable from the Lefty logo while Cyberpunk is active.
+   The character brings her own green/red signal into the HUD.
+   ──────────────────────────────────────────────────────────────── */
+[data-lefty-theme="cyberpunk"] .capri-logo {
+  clip-path: none;
+  border-color: rgba(0, 240, 255, 0.34) !important;
+  transition: border-color 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+[data-lefty-theme="cyberpunk"] .capri-logo:not(:disabled) {
+  cursor: pointer;
+}
+
+[data-lefty-theme="cyberpunk"] .capri-logo:not(:disabled):hover {
+  border-color: var(--cyber-pink) !important;
+  box-shadow: 0 0 20px rgba(255, 42, 109, 0.24), inset 0 0 12px rgba(255, 42, 109, 0.08);
+  filter: saturate(1.12);
+}
+
+[data-lefty-theme="cyberpunk"] .capri-logo:not(:disabled):focus-visible {
+  outline: 1px solid var(--cyber-cyan);
+  outline-offset: 3px;
+}
+
+.capri-backdrop {
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255, 30, 60, 0.1), transparent 48%),
+    rgba(2, 4, 8, 0.87);
+  backdrop-filter: blur(8px) saturate(0.72);
+  -webkit-backdrop-filter: blur(8px) saturate(0.72);
+}
+
+.capri-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 240, 255, 0.035) 0 1px,
+    transparent 1px 4px
+  );
+  opacity: 0.65;
+}
+
+.capri-backdrop-in {
+  animation: capri-backdrop-in 260ms var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+
+.capri-backdrop-out {
+  animation: capri-backdrop-out 260ms var(--md-sys-motion-easing-emphasized-accelerate) forwards;
+}
+
+.capri-modal {
+  --capri-green: #8CFF2E;
+  --capri-red: #FF1E3C;
+  --capri-line: rgba(140, 255, 46, 0.22);
+  position: relative;
+  z-index: 1;
+  border: 1px solid rgba(140, 255, 46, 0.38);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 30, 60, 0.16), transparent 34%),
+    radial-gradient(circle at 100% 100%, rgba(140, 255, 46, 0.1), transparent 40%),
+    linear-gradient(135deg, #0A0E10 0%, #07090C 56%, #0D0A0C 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 42, 109, 0.13),
+    0 0 46px rgba(140, 255, 46, 0.09),
+    inset 0 0 42px rgba(0, 0, 0, 0.45);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 22px) 0,
+    100% 22px,
+    100% 100%,
+    22px 100%,
+    0 calc(100% - 22px)
+  );
+}
+
+.capri-modal::before,
+.capri-modal::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.capri-modal::before {
+  top: 0;
+  left: 0;
+  border-top: 2px solid var(--capri-green);
+  border-left: 2px solid var(--capri-green);
+  filter: drop-shadow(0 0 6px rgba(140, 255, 46, 0.45));
+}
+
+.capri-modal::after {
+  right: 0;
+  bottom: 0;
+  border-right: 2px solid var(--cyber-pink);
+  border-bottom: 2px solid var(--cyber-pink);
+  filter: drop-shadow(0 0 6px rgba(255, 42, 109, 0.45));
+}
+
+.capri-modal-in {
+  animation: capri-modal-in 340ms var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+
+.capri-modal-out {
+  animation: capri-modal-out 240ms var(--md-sys-motion-easing-emphasized-accelerate) forwards;
+}
+
+.capri-scanlines {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 240, 255, 0.035) 0 1px,
+      transparent 1px 4px
+    ),
+    linear-gradient(115deg, transparent 0 54%, rgba(255, 42, 109, 0.06) 54% 54.4%, transparent 54.4% 100%);
+  opacity: 0.55;
+}
+
+.capri-signal-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--capri-green);
+  box-shadow: 0 0 10px rgba(140, 255, 46, 0.8);
+  animation: capri-signal-pulse 1.8s ease-in-out infinite;
+}
+
+.capri-kicker {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--capri-green);
+  text-shadow: 0 0 14px rgba(140, 255, 46, 0.22);
+}
+
+.capri-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(140, 255, 46, 0.32);
+  background: rgba(140, 255, 46, 0.06);
+  color: #D8FFE4;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.capri-close:hover {
+  border-color: var(--capri-red);
+  background: var(--capri-red);
+  color: #FFFFFF;
+  box-shadow: 0 0 22px rgba(255, 30, 60, 0.3);
+}
+
+.capri-portrait {
+  position: relative;
+  overflow: hidden;
+  align-self: stretch;
+  aspect-ratio: 379 / 319;
+  border: 1px solid rgba(255, 30, 60, 0.55);
+  background: #0A0004;
+  box-shadow:
+    0 0 0 1px rgba(140, 255, 46, 0.12),
+    0 0 34px rgba(255, 30, 60, 0.18);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+
+.capri-portrait img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  object-fit: cover;
+  filter: saturate(1.08) contrast(1.03);
+}
+
+.capri-portrait::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.24) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(115deg, rgba(255, 30, 60, 0.12), transparent 42%, rgba(140, 255, 46, 0.07));
+  opacity: 0.55;
+}
+
+.capri-portrait-tag,
+.capri-portrait-live {
+  position: absolute;
+  z-index: 2;
+  padding: 4px 6px;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+.capri-portrait-tag {
+  top: 8px;
+  left: 8px;
+  color: var(--capri-green);
+  background: rgba(5, 6, 10, 0.76);
+  border: 1px solid rgba(140, 255, 46, 0.4);
+}
+
+.capri-portrait-live {
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #FFFFFF;
+  background: rgba(255, 30, 60, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.capri-portrait-live > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  animation: capri-live-blink 1.2s steps(1) infinite;
+}
+
+.capri-name {
+  position: relative;
+  display: inline-block;
+  margin-top: 5px;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: clamp(2.8rem, 7vw, 4.2rem);
+  font-weight: 700;
+  line-height: 0.86;
+  letter-spacing: -0.06em;
+  color: var(--capri-green);
+  text-shadow:
+    3px 0 rgba(255, 42, 109, 0.55),
+    -3px 0 rgba(0, 240, 255, 0.42),
+    0 0 28px rgba(140, 255, 46, 0.28);
+}
+
+.capri-name::after {
+  content: "CAPRI";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  color: rgba(255, 42, 109, 0.52);
+  transform: translate(3px, -1px);
+  clip-path: inset(38% 0 42% 0);
+  pointer-events: none;
+  animation: capri-name-glitch 2.8s steps(1) infinite;
+}
+
+.capri-quote {
+  margin-top: 14px;
+  padding-left: 13px;
+  border-left: 2px solid var(--capri-green);
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: clamp(0.95rem, 2.4vw, 1.12rem);
+  line-height: 1.55;
+  color: #E9FFF0;
+  text-shadow: 0 0 16px rgba(140, 255, 46, 0.08);
+}
+
+.capri-quote span {
+  color: var(--capri-green);
+  text-shadow: 0 0 16px rgba(140, 255, 46, 0.35);
+}
+
+.capri-caption {
+  margin-top: 12px;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.5;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(155, 176, 198, 0.68);
+}
+
+.capri-dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  margin-top: 18px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 42, 109, 0.55);
+  background: rgba(255, 42, 109, 0.12);
+  color: #FFD6E3;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.capri-dismiss:hover {
+  border-color: var(--cyber-pink);
+  background: var(--cyber-pink);
+  color: var(--cyber-black);
+  box-shadow: 0 0 22px rgba(255, 42, 109, 0.28);
+}
+
+.capri-dismiss > span {
+  font-size: 13px;
+  line-height: 1;
+}
+
+@keyframes capri-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes capri-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes capri-modal-in {
+  0% { opacity: 0; transform: translateY(14px) scale(0.97); filter: blur(2px); }
+  55% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes capri-modal-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+
+@keyframes capri-signal-pulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 8px rgba(140, 255, 46, 0.55); }
+  50% { opacity: 1; box-shadow: 0 0 16px rgba(140, 255, 46, 0.95); }
+}
+
+@keyframes capri-live-blink {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0.25; }
+}
+
+@keyframes capri-name-glitch {
+  0%, 86%, 100% { opacity: 0; transform: translate(3px, -1px); }
+  87% { opacity: 1; transform: translate(-3px, 1px); }
+  89% { opacity: 0.7; transform: translate(4px, 0); }
+  91% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capri-backdrop-in,
+  .capri-backdrop-out,
+  .capri-modal-in,
+  .capri-modal-out,
+  .capri-signal-dot,
+  .capri-portrait-live > span,
+  .capri-name::after {
+    animation: none !important;
+  }
 }

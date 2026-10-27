@@ -9,4 +9,11 @@ export default defineConfig({
     strictPort: true,
   },
   envPrefix: ["VITE_", "TAURI_"],
+  build: {
+    // WebView2 en Windows es Chromium moderno: no transpilar para Safari/Firefox.
+    target: "chrome105",
+    minify: "esbuild",
+    cssMinify: "esbuild",
+    sourcemap: false,
+  },
 });

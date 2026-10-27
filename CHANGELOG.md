@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.0 — 2026-10-27
+- New: Cyberpunk theme in Settings → Appearance → Theme: neon yellow/cyan/magenta palette, angular HUD panels, clipped controls and JetBrains Mono labels
+- Default theme is now labeled Material UI (same visual theme and settings)
+- Cyberpunk keeps the existing layout, spacing and overlay structure; only the visual language changes
+- Cyberpunk uses its own palette, so accent color and high-contrast controls are paused while it is active
+- Theme choice persists across restarts; per-profile accent previews preserve the active theme
+- Capri easter egg
+- Includes the 1.7.2 mouse inversion lifecycle fix: inversion stays active while Lefty runs in the tray, and is restored on full exit, shutdown/restart or restart-as-admin
+
+## 1.7.2 — 2026-10-26
+- Hotfix: Material Expressive UI polish and accessibility behavior fixes
+- Fix: mouse click inversion no longer survives restart/shutdown; it stays active while Lefty runs (including the tray) and is restored when Lefty closes or Windows shuts down
+- Small performance improvements: faster combo lookup, async backend calls, adaptive focus polling
+
 ## 1.7.1 — 2026-10-06
 - Hotfix: offline-first fonts (blank window without internet fixed)
 

@@ -36,10 +36,104 @@ export interface ResolvedAccent {
   isCustom: boolean;
 }
 
+/** Temas visuales completos. El acento M3 sigue existiendo dentro del tema default. */
+export type ThemeId = "default" | "cyberpunk";
+
+export interface ThemePreset {
+  id: ThemeId;
+  name: string;
+  tagline: string;
+  description: string;
+  swatches: readonly string[];
+}
+
+export const THEME_PRESETS: readonly ThemePreset[] = [
+  {
+    id: "default",
+    name: "Material UI",
+    tagline: "Original",
+    description: "The original Material 3 Expressive interface. Accent colors stay editable.",
+    swatches: ["#121212", "#2A2A2A", "#E6E1EC", "#FFFFFF"],
+  },
+  {
+    id: "cyberpunk",
+    name: "Cyberpunk",
+    tagline: "Night City",
+    description: "Neon yellow, cyan and magenta, angular HUD panels and monospace controls.",
+    swatches: ["#FCE300", "#00F0FF", "#FF2A6D", "#11141D"],
+  },
+];
+
 const LS_KEY = "lefty_accent";
 const LS_HC_KEY = "lefty_high_contrast";
+const LS_THEME_KEY = "lefty_theme";
 export const CUSTOM_KEY = "custom";
 const STYLE_ID = "lefty-accent-overrides";
+
+/**
+ * Paleta completa del tema Cyberpunk. Se pinta inline con `!important`
+ * después del esquema M3 para que el acento de perfil no la pise.
+ * Los nombres coinciden con los tokens que consumen Tailwind y styles.css.
+ */
+const CYBER_VARS: Record<string, string> = {
+  "--md-sys-color-primary": "#FCE300",
+  "--md-sys-color-on-primary": "#0B0B00",
+  "--md-sys-color-primary-container": "#3B3600",
+  "--md-sys-color-on-primary-container": "#FFF27A",
+  "--md-sys-color-primary-fixed": "#FCE300",
+  "--md-sys-color-primary-fixed-dim": "#C9B800",
+  "--md-sys-color-on-primary-fixed": "#0B0B00",
+  "--md-sys-color-on-primary-fixed-variant": "#4A4300",
+  "--md-sys-color-inverse-primary": "#6A5F00",
+  "--md-sys-color-secondary": "#00F0FF",
+  "--md-sys-color-on-secondary": "#001417",
+  "--md-sys-color-secondary-container": "#003B42",
+  "--md-sys-color-on-secondary-container": "#8CF8FF",
+  "--md-sys-color-secondary-fixed": "#00F0FF",
+  "--md-sys-color-secondary-fixed-dim": "#00B8C4",
+  "--md-sys-color-on-secondary-fixed": "#001417",
+  "--md-sys-color-on-secondary-fixed-variant": "#004F57",
+  "--md-sys-color-tertiary": "#FF2A6D",
+  "--md-sys-color-on-tertiary": "#1A0008",
+  "--md-sys-color-tertiary-container": "#4A001B",
+  "--md-sys-color-on-tertiary-container": "#FFB3C8",
+  "--md-sys-color-tertiary-fixed": "#FF2A6D",
+  "--md-sys-color-tertiary-fixed-dim": "#C4004A",
+  "--md-sys-color-on-tertiary-fixed": "#1A0008",
+  "--md-sys-color-on-tertiary-fixed-variant": "#5C0022",
+  "--md-sys-color-error": "#FF5252",
+  "--md-sys-color-on-error": "#1A0000",
+  "--md-sys-color-error-container": "#4A0000",
+  "--md-sys-color-on-error-container": "#FFB4B4",
+  "--md-sys-color-surface": "#0A0C12",
+  "--md-sys-color-surface-dim": "#05060A",
+  "--md-sys-color-surface-bright": "#2A3040",
+  "--md-sys-color-surface-container-lowest": "#07080D",
+  "--md-sys-color-surface-container-low": "#0C0E15",
+  "--md-sys-color-surface-container": "#11141D",
+  "--md-sys-color-surface-container-high": "#171B26",
+  "--md-sys-color-surface-container-highest": "#1E2431",
+  "--md-sys-color-on-surface": "#E6F7FF",
+  "--md-sys-color-on-surface-variant": "#9BB0C6",
+  "--md-sys-color-surface-variant": "#1E2431",
+  "--md-sys-color-outline": "#4A5A70",
+  "--md-sys-color-outline-variant": "#263345",
+  "--md-sys-color-inverse-surface": "#E6F7FF",
+  "--md-sys-color-inverse-on-surface": "#0A0C12",
+  "--md-sys-color-surface-tint": "#FCE300",
+  "--md-sys-color-scrim": "#000000",
+  "--md-sys-color-shadow": "#000000",
+};
+
+const CYBER_KEYS = Object.keys(CYBER_VARS);
+
+function readStoredTheme(): ThemeId {
+  try {
+    return localStorage.getItem(LS_THEME_KEY) === "cyberpunk" ? "cyberpunk" : "default";
+  } catch {
+    return "default";
+  }
+}
 /** Ratio WCAG mínimo exigido en modo alto contraste (texto normal AA). */
 export const HC_MIN_RATIO = 4.5;
 
@@ -171,6 +265,41 @@ function setInlineVar(name: string, value: string): void {
   document.documentElement.style.setProperty(name, value, "important");
 }
 
+function setInlineVarOn(el: HTMLElement, name: string, value: string): void {
+  el.style.setProperty(name, value, "important");
+}
+
+/**
+ * Pinta (o limpia) las variables del tema Cyberpunk. Se llama después de
+ * `applyAccent` para que la paleta neón gane sobre el esquema M3.
+ *
+ * Importante: el generador M3 declara los tokens en `:root, :host, html, body`
+ * con `!important`. Por eso el tema debe fijarse inline en <html> Y <body>:
+ * si solo se fija en <html>, <body> conserva su propio valor y los controles
+ * heredan la paleta M3 (blanco) en vez de la neón.
+ */
+export function applyTheme(theme: ThemeId): void {
+  if (typeof document === "undefined") return;
+  const targets = [document.documentElement, document.body].filter(Boolean) as HTMLElement[];
+  const root = document.documentElement;
+  if (theme === "cyberpunk") {
+    root.dataset.leftyTheme = "cyberpunk";
+    for (const el of targets) {
+      for (const [k, v] of Object.entries(CYBER_VARS)) setInlineVarOn(el, k, v);
+    }
+  } else {
+    delete root.dataset.leftyTheme;
+    for (const el of targets) {
+      for (const k of CYBER_KEYS) el.style.removeProperty(k);
+    }
+  }
+}
+
+/** Init síncrono pre-render (llamar en main.tsx después de initAccent). */
+export function initTheme(): void {
+  applyTheme(readStoredTheme());
+}
+
 /** Vía redundante: <style> propio al FINAL del head (gana cualquier empate de cascada). */
 function syncStyleTag(vars: Record<string, string>): void {
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -227,6 +356,11 @@ export function applyAccent(hex: string): void {
   for (const [k, v] of Object.entries(vars)) setInlineVar(k, v);
   syncStyleTag(vars);
   document.documentElement.dataset.accent = seed;
+  // Las previews de acento (p. ej. al editar un perfil) también deben
+  // conservar el tema Cyberpunk mientras esté activo.
+  if (document.documentElement.dataset.leftyTheme === "cyberpunk") {
+    applyTheme("cyberpunk");
+  }
 }
 
 /** Init síncrono pre-render (llamar en main.tsx tras el tema M3, evita flash).
@@ -285,6 +419,9 @@ interface AccentContextValue {
   /** Alto contraste: ajusta el acento pintado a ≥4.5:1. */
   highContrast: boolean;
   setHighContrast: (v: boolean) => void;
+  /** Tema visual completo (default / cyberpunk). */
+  theme: ThemeId;
+  setTheme: (id: ThemeId) => void;
 }
 
 const AccentContext = createContext<AccentContextValue>({
@@ -294,6 +431,8 @@ const AccentContext = createContext<AccentContextValue>({
   setCustomHex: () => undefined,
   highContrast: false,
   setHighContrast: () => undefined,
+  theme: "default",
+  setTheme: () => undefined,
 });
 
 function readStoredRaw(): string {
@@ -307,6 +446,7 @@ function readStoredRaw(): string {
 export function AccentProvider({ children }: { children: ReactNode }): JSX.Element {
   const [stored, setStored] = useState<string>(readStoredRaw);
   const [highContrast, setHighContrastState] = useState<boolean>(() => isHighContrastEnabled());
+  const [theme, setThemeState] = useState<ThemeId>(readStoredTheme);
 
   const setAccent = useCallback((id: string) => {
     const r = resolveAccent(id);
@@ -327,6 +467,17 @@ export function AccentProvider({ children }: { children: ReactNode }): JSX.Eleme
     setHighContrastState(v);
   }, []);
 
+  const setTheme = useCallback((id: ThemeId) => {
+    // Persistir ya: applyAccent consulta el atributo del documento para
+    // conservar el tema durante previews de acento.
+    try {
+      localStorage.setItem(LS_THEME_KEY, id);
+    } catch {
+      /* modo privado: aplica igual durante la sesión */
+    }
+    setThemeState(id);
+  }, []);
+
   const accent = useMemo<ResolvedAccent>(() => resolveAccent(stored), [stored]);
   const accentHex = accent.hex;
 
@@ -342,8 +493,17 @@ export function AccentProvider({ children }: { children: ReactNode }): JSX.Eleme
   }, [stored]);
 
   const value = useMemo<AccentContextValue>(
-    () => ({ accent, accentHex, setAccent, setCustomHex, highContrast, setHighContrast }),
-    [accent, accentHex, setAccent, setCustomHex, highContrast, setHighContrast]
+    () => ({
+      accent,
+      accentHex,
+      setAccent,
+      setCustomHex,
+      highContrast,
+      setHighContrast,
+      theme,
+      setTheme,
+    }),
+    [accent, accentHex, setAccent, setCustomHex, highContrast, setHighContrast, theme, setTheme]
   );
 
   return <AccentContext.Provider value={value}>{children}</AccentContext.Provider>;

@@ -22,6 +22,8 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 - Add-mapping validation: duplicate sources and self-maps are blocked inline
 - Live key tester: see what the game receives before saving
 - Accent Color themes: 10 presets + custom picker, per-profile override, high-contrast mode (Settings → Appearance)
+- Visual themes: Material UI (default) and Cyberpunk (Settings → Appearance → Theme)
+- Capri easter egg
 - Share profiles with compact codes (`⋯ → Share`), review before importing, automatic backups
 - Interface sounds: distinct chimes for activate vs pause (Settings → General)
 - Gaming focus: Sticky/Filter key popups stay silent while active
@@ -56,6 +58,12 @@ Remap any key for left-handed gaming. Low latency, native Rust engine.
 | ![Settings input](assets/screenshots/settings-input.png) | ![Settings profiles](assets/screenshots/settings-profiles.png) |
 
 ![Settings about](assets/screenshots/settings-about.png)
+
+### Cyberpunk theme
+
+| Main window | Appearance |
+|---|---|
+| ![Cyberpunk main](assets/screenshots/main-dashboard-cyberpunk.png) | ![Cyberpunk appearance](assets/screenshots/settings-apparence-cyberpunk.png) |
 
 ## Install
 

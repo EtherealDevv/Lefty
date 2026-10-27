@@ -30,7 +30,7 @@ export default function GameBrowser({ title, onPick, isTaken, onClose }: Props) 
   );
 
   return (
-    <div className="fixed inset-0 bg-scrim/70 backdrop-blur-sm grid place-items-center z-[70] p-4 m3-backdrop animate-m3-backdrop-in" onClick={onClose}>
+    <div className="fixed inset-0 bg-scrim/70 grid place-items-center z-[70] p-4 m3-backdrop animate-m3-backdrop-in" onClick={onClose}>
       <div className="w-full max-w-[440px] max-h-[80vh] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 flex flex-col overflow-hidden m3-modal animate-m3-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-outline-variant flex items-center gap-3">
           <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shrink-0 shadow-m3-1"><Gamepad2 size={18} /></span>

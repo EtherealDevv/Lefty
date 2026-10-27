@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -17,17 +21,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: cargo check --manifest-path engine_native/Cargo.toml
-      - run: cargo check --manifest-path tauri-app/src-tauri/Cargo.toml
       - run: npm ci
         working-directory: tauri-app
+      # Tauri's build script validates frontendDist (../dist) during cargo
+      # check; build the frontend first or the check fails on a clean runner.
       - run: npm run build
         working-directory: tauri-app
+      - run: cargo check --manifest-path engine_native/Cargo.toml
+      - run: cargo test --manifest-path engine_native/Cargo.toml
+      - run: cargo check --manifest-path tauri-app/src-tauri/Cargo.toml
+      - run: cargo test --manifest-path tauri-app/src-tauri/Cargo.toml
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     needs: build
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -38,10 +48,17 @@ jobs:
           node-version: 18
       - run: npm ci
         working-directory: tauri-app
+      # The installer bundles lefty_engine.exe as a resource: build it and put
+      # it where tauri.conf.json expects it BEFORE npx tauri build.
+      - run: cargo build --release --manifest-path engine_native/Cargo.toml
+      - run: Copy-Item engine_native/target/release/lefty_engine.exe tauri-app/src-tauri/lefty_engine.exe -Force
       - run: npx tauri build
         working-directory: tauri-app
       - uses: softprops/action-gh-release@v2
         with:
+          name: Lefty ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
           files: |
             tauri-app/src-tauri/target/release/bundle/msi/*.msi
             tauri-app/src-tauri/target/release/bundle/nsis/*-setup.exe

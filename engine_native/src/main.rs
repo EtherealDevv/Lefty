@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use parking_lot::Mutex;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
@@ -40,6 +41,9 @@ static HOTKEY_VK: AtomicU32 = AtomicU32::new(0x75);
 // repetidos al mantenerlo pulsado; sin esto conmuta en ráfaga.
 static LAST_HOTKEY_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
 const HOTKEY_DEBOUNCE_MS: u64 = 400;
+/// Serializa las actualizaciones de mappings/pausa (no toca el hook normal,
+/// solo las escrituras; el hook usa el seqlock de `mapping_seq`).
+static UPDATE_LOCK: Mutex<()> = Mutex::new(());
 
 #[inline(always)]
 fn now_ms() -> u64 {
@@ -78,22 +82,40 @@ pub(crate) fn latency_record(dt_ticks: u64) {
 
 #[inline(always)]
 fn set_mappings(m: HashMap<u32, Vec<u32>>) {
-    // Suelta mods de combos en hold antes de tirar el estado (anti-stuck).
-    keyboard_event_handlers::release_all_combo_mods();
+    let _guard = UPDATE_LOCK.lock();
     let state = state::global_state();
-    state.clear_all();
-    for (src, dst) in m {
-        if dst.len() == 1 {
-            state.set_single_key_remap(src, dst[0]);
-        } else if !dst.is_empty() {
-            state.set_combo_remap(src, dst);
-        }
+    // Seqlock par: mientras dura la sustitución el hook no inyecta. Además se
+    // suelta todo lo inyectado, porque el keyup llegará con el mapa nuevo.
+    state.begin_mapping_update();
+    keyboard_event_handlers::release_all_injected(state);
+    state.replace_mappings(m);
+    state.end_mapping_update();
+}
+
+/// Pausa/reanuda de forma segura: al pausar suelta solo lo que inyectó Lefty.
+/// Así F6 (y el botón de la UI) siempre pueden reanudar sin reiniciar el engine.
+fn apply_enabled(enabled: bool) {
+    if enabled {
+        ENABLED.store(true, Ordering::Release);
+        return;
     }
+    let state = state::global_state();
+    let _guard = UPDATE_LOCK.lock();
+    if !ENABLED.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    state.begin_mapping_update();
+    keyboard_event_handlers::release_all_injected(state);
+    state.end_mapping_update();
 }
 
 #[inline(always)]
 unsafe extern "system" fn mouse_hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if n != HC_ACTION as i32 {
+        return CallNextHookEx(G_HOOK_COPY, n, w, l);
+    }
+    // Pausado: los botones laterales vuelven a ser back/forward.
+    if !ENABLED.load(Ordering::Acquire) {
         return CallNextHookEx(G_HOOK_COPY, n, w, l);
     }
     let msg = w.0 as u32;
@@ -111,10 +133,8 @@ unsafe extern "system" fn mouse_hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     };
     let is_down = msg == WM_XBUTTONDOWN;
     let state = state::global_state();
-    let t0 = qpc_now();
     let result = keyboard_event_handlers::handle_single_key_remap(&mut vk, is_down, 0, state);
     if result.is_some() {
-        latency_record(qpc_now().wrapping_sub(t0));
         return LRESULT(1);
     }
     CallNextHookEx(G_HOOK_COPY, n, w, l)
@@ -147,10 +167,7 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         }
         LAST_HOTKEY_TOGGLE_MS.store(now, Ordering::Relaxed);
         let new_val = !ENABLED.load(Ordering::Relaxed);
-        ENABLED.store(new_val, Ordering::Relaxed);
-        if !new_val {
-            keyboard_event_handlers::release_all_combo_mods();
-        }
+        apply_enabled(new_val);
         if let Ok(appdata) = env::var("APPDATA") {
             let p = PathBuf::from(appdata).join("Lefty").join("f6_toggle.txt");
             let val = new_val;
@@ -172,11 +189,9 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     let is_key_down = w.0 == WM_KEYDOWN as usize || w.0 == WM_SYSKEYDOWN as usize;
 
     let state = state::global_state();
-    let t0 = qpc_now();
     let result = keyboard_event_handlers::handle_single_key_remap(&mut vk, is_key_down, extra, state);
 
     if result.is_some() {
-        latency_record(qpc_now().wrapping_sub(t0));
         return LRESULT(1);
     }
 
@@ -289,13 +304,22 @@ fn main() {
             if let Ok(s) = fs::read_to_string(&f6_path2) {
                 if s.trim() != last.trim() {
                     last = s.clone();
-                    ENABLED.store(s.trim() == "1", Ordering::Relaxed);
+                    apply_enabled(s.trim() == "1");
                 }
             }
-            // Apagado graceful: soltar TODO, limpiar y salir sin dejar pegadas.
+            // Apagado graceful: soltar lo inyectado, limpiar y salir sin dejar pegadas.
             if fs::read_to_string(&stop_path2).map(|s| s.trim() == "1").unwrap_or(false) {
-                keyboard_event_handlers::release_all_keys();
+                let state = state::global_state();
+                {
+                    let _guard = UPDATE_LOCK.lock();
+                    state.begin_mapping_update();
+                    ENABLED.store(false, Ordering::Release);
+                    keyboard_event_handlers::release_all_injected(state);
+                    state.end_mapping_update();
+                }
                 let _ = fs::remove_file(&stop_path2);
+                // Margen para que un hook en vuelo termine y deshaga su inyección.
+                std::thread::sleep(Duration::from_millis(20));
                 unsafe { windows::Win32::Media::timeEndPeriod(1); }
                 std::process::exit(0);
             }
@@ -334,15 +358,24 @@ fn main() {
         }
     }
     // Vuelca avg/max/eventos del último segundo para la UI (About → latencia).
-    std::thread::spawn(|| {
+    // Solo escribe cuando hubo remapeos (o una vez al pasar a inactivo): antes
+    // escribía el JSON cada segundo aunque no ocurriera nada, despertando disco
+    // y antivirus durante toda la sesión.
+    let latency_file = latency_path();
+    let _ = fs::write(&latency_file, "{\"avg_us\":0,\"max_us\":0,\"events\":0,\"ts_ms\":0}");
+    std::thread::spawn(move || {
+        let mut was_active = false;
         loop {
             std::thread::sleep(Duration::from_millis(1000));
             let n = LAT_N.swap(0, Ordering::Relaxed);
             let sum = LAT_SUM_US.swap(0, Ordering::Relaxed);
             let max = LAT_MAX_US.swap(0, Ordering::Relaxed);
-            let avg = if n > 0 { sum / n } else { 0 };
-            let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let _ = fs::write(latency_path(), format!("{{\"avg_us\":{avg},\"max_us\":{max},\"events\":{n},\"ts_ms\":{ts}}}"));
+            if n > 0 || was_active {
+                let avg = if n > 0 { sum / n } else { 0 };
+                let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                let _ = fs::write(&latency_file, format!("{{\"avg_us\":{avg},\"max_us\":{max},\"events\":{n},\"ts_ms\":{ts}}}"));
+                was_active = n > 0;
+            }
             if !RUNNING.load(Ordering::Relaxed) {
                 break;
             }
@@ -429,30 +462,24 @@ fn main() {
 
     if let Some(pid) = parent_pid_from_args() {
         std::thread::spawn(move || {
-            use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-            use windows::Win32::System::Threading::{OpenProcess, GetExitCodeProcess, PROCESS_QUERY_INFORMATION, PROCESS_SYNCHRONIZE};
+            use windows::Win32::Foundation::CloseHandle;
+            use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE};
             use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
             use windows::Win32::Foundation::{WPARAM, LPARAM};
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                let parent_dead = unsafe {
-                    match OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
-                        Ok(handle) => {
-                            let mut exit_code: u32 = 0;
-                            let _ = GetExitCodeProcess(handle, &mut exit_code);
-                            let _ = CloseHandle(handle);
-                            exit_code != STILL_ACTIVE.0 as u32
-                        }
-                        Err(_) => true, // PID inexistente: el padre murió
+            // Un solo handle y una espera bloqueante: el padre muere → el wait
+            // despierta al instante. Antes se abría/cerraba el proceso cada 500 ms.
+            let parent_dead = unsafe {
+                match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+                    Ok(handle) => {
+                        let _ = WaitForSingleObject(handle, INFINITE);
+                        let _ = CloseHandle(handle);
+                        true
                     }
-                };
-                if !RUNNING.load(Ordering::Relaxed) {
-                    break;
+                    Err(_) => true, // PID inexistente o sin permiso: el padre murió
                 }
-                if parent_dead {
-                    RUNNING.store(false, Ordering::Relaxed);
-                    break;
-                }
+            };
+            if parent_dead {
+                RUNNING.store(false, Ordering::Relaxed);
             }
             // Despertar SÍ o SÍ el message loop principal (reintentar: el primer post
             // puede fallar si la cola aún no existe). Sin esto el proceso queda zombi
@@ -480,6 +507,11 @@ fn main() {
             DispatchMessageW(&msg);
         }
         MAIN_DONE.store(true, Ordering::Relaxed);
+        let state = state::global_state();
+        state.begin_mapping_update();
+        ENABLED.store(false, Ordering::Release);
+        keyboard_event_handlers::release_all_injected(state);
+        state.end_mapping_update();
         windows::Win32::Media::timeEndPeriod(1);
         let _ = UnhookWindowsHookEx(G_HOOK);
         let _ = UnhookWindowsHookEx(G_MOUSE_HOOK);

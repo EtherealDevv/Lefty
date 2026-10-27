@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { PLUS_KEYS, splitComboTarget } from "./comboTarget";
+import { splitComboTarget } from "./comboTarget";
+import { keyIdentity } from "./keyIdentity";
 import type { Mapping } from "./profilesIO";
 
 export type MappingConflict =
@@ -20,7 +21,7 @@ export interface MappingValidation {
  * `dstKey` puede ser combo (`CTRL+S`).
  * - `self`: el origen está entre los destinos → "Source and target keys cannot be the same."
  * - `duplicate`: el origen ya existe → "Key 'X' is already mapped to 'Y'."
- * - `combo`: combo con Disabled o main con `+` → mensaje específico.
+ * - `combo`: combo con Disabled/mouse o main vacío → mensaje específico.
  */
 export function useMappingValidation(
   srcKey: string,
@@ -29,14 +30,16 @@ export function useMappingValidation(
 ): MappingValidation {
   return useMemo<MappingValidation>(() => {
     const parts = splitComboTarget(dstKey);
-    if (parts.some((p) => p === "MOUSE_X1" || p === "MOUSE_X2")) {
+    const srcId = keyIdentity(srcKey);
+    const partIds = parts.map(keyIdentity);
+    if (partIds.some((p) => p === "mouse_x1" || p === "mouse_x2")) {
       return {
         conflict: { kind: "combo" },
         canSave: false,
         message: "Mouse buttons can only start a mapping.",
       };
     }
-    if (srcKey !== "" && parts.includes(srcKey)) {
+    if (srcId !== "" && partIds.includes(srcId)) {
       return {
         conflict: { kind: "self" },
         canSave: false,
@@ -44,7 +47,7 @@ export function useMappingValidation(
       };
     }
     if (parts.length > 1) {
-      if (parts.includes("DISABLED")) {
+      if (partIds.includes("disabled")) {
         return {
           conflict: { kind: "combo" },
           canSave: false,
@@ -52,7 +55,7 @@ export function useMappingValidation(
         };
       }
       const main = parts[parts.length - 1];
-      if (PLUS_KEYS.includes(main)) {
+      if (!main.trim()) {
         return {
           conflict: { kind: "combo" },
           canSave: false,
@@ -60,7 +63,7 @@ export function useMappingValidation(
         };
       }
     }
-    const hit = mappings.find(([s]) => s === srcKey);
+    const hit = mappings.find(([s]) => keyIdentity(s) === srcId);
     if (hit) {
       return {
         conflict: { kind: "duplicate", target: hit[1] },

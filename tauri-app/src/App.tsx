@@ -1,19 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Keyboard, Plus, Trash2, ArrowLeftRight, Settings, Mouse, Power, EyeOff, KeyboardOff, Info, TriangleAlert, SlidersHorizontal, Palette, FileJson, Volume2, VolumeX, Minimize2, Play, Pause, Gauge, Pencil, Copy, MoreHorizontal, Share2, Check, Download, Loader2, ArrowUp, ArrowDown, X, Github, Search, ChevronDown } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import laskIcon from "./LASK.png";
+import capriImage from "./assets/capri.png";
 import ProfileImportExport from "./components/ProfileImportExport";
 import GameBrowser from "./components/GameBrowser";
 import AccentColorSection from "./components/AccentColorSection";
+import ThemeSection from "./components/ThemeSection";
 import { PROFILE_ICONS, ProfileGlyph, DEFAULT_PROFILE_ICON, migrateLegacyIcon } from "./lib/profileIcons";
-import { useAccent, applyAccent, resolveAccent, normalizeProfileAccent, adjustForContrast, ACCENT_PRESETS, contrastOn } from "./theme/accent";
+import { useAccent, applyAccent, applyTheme, resolveAccent, normalizeProfileAccent, adjustForContrast, ACCENT_PRESETS, contrastOn } from "./theme/accent";
 import GuidedTour from "./components/GuidedTour";
 import { COMBO_MODS, isComboTarget, joinComboTarget } from "./lib/comboTarget";
 import { useMappingValidation } from "./lib/useMappingValidation";
+import { keyIdentity } from "./lib/keyIdentity";
 import { isSoundEnabled, setSoundEnabled, playToggleSound, unlockAudio } from "./lib/toggleSound";
-import { encodeShareCode, type Profile, type Mapping, type ProfilesMap } from "./lib/profilesIO";
+import { encodeShareCode, validateProfilesMap, type Profile, type Mapping, type ProfilesMap } from "./lib/profilesIO";
 import { copyText } from "./lib/clipboard";
 
 const FALLBACK_ALL_KEYS = [
@@ -120,13 +123,134 @@ function engineMappings(p: Profile): Mapping[] {
   return set.size === 0 ? p.mappings : p.mappings.filter(([s]) => !set.has(s));
 }
 
+/** Normaliza nombres comerciales: "ELDEN RING™" debe casar con "eldenring.exe". */
+function normalizeAppName(s: string): string {
+  return s.toLowerCase().replace(/[™®©]/g, "").replace(/\s+/g, " ").trim();
+}
+
 /** ¿El exe/título en foco corresponde a la lista (autoApps o playApps)? */
 function matchesAppList(apps: readonly string[] | undefined, exe: string, title: string): boolean {
   if (!apps || apps.length === 0) return false;
+  const exeN = normalizeAppName(exe);
+  const exeBase = exeN.replace(/\.exe$/i, "");
+  const titleN = normalizeAppName(title);
   return apps.some((a) => {
-    const n = a.trim().toLowerCase();
-    return n !== "" && (exe === n || (title !== "" && title.includes(n)));
+    const n = normalizeAppName(a);
+    if (n === "") return false;
+    return n === exeN || n === exeBase || (titleN !== "" && titleN.includes(n));
   });
+}
+
+/** Nombre canónico de una tecla capturada: la lista del layout manda. */
+function canonicalKeyName(key: string, allKeys: readonly string[]): string | null {
+  const k = key.trim();
+  if (!k) return null;
+  const exact = allKeys.find((x) => x === k);
+  if (exact) return exact;
+  const lower = k.toLowerCase();
+  const ci = allKeys.find((x) => x.toLowerCase() === lower);
+  if (ci) return ci;
+  return k.startsWith("VK_") ? k : null;
+}
+
+const isDisabledKeyName = (k: string): boolean => {
+  const n = k.trim().toLowerCase();
+  return n === "disabled" || n === "disable";
+};
+const isMouseSourceName = (k: string): boolean => k.startsWith("MOUSE_");
+const MODIFIER_KEY_NAMES = new Set([
+  "shift", "shift (left)", "shift (right)", "lshift", "rshift",
+  "ctrl", "ctrl (left)", "ctrl (right)", "lctrl", "rctrl",
+  "alt", "alt (left)", "alt (right)", "lalt", "ralt",
+  "win", "win (left)", "win (right)", "lwin", "rwin",
+]);
+/** Un hotkey global se traga la tecla: elegir Shift/Ctrl/Alt/Win dejaría de
+ *  funcionar el modificador en todo Windows. */
+const isModifierKeyName = (k: string): boolean =>
+  MODIFIER_KEY_NAMES.has(k.trim().toLowerCase());
+
+/** Perfil vacío de emergencia: evita que un `active` huérfano tumbe la UI. */
+const EMPTY_PROFILE: Profile = {
+  display_name: "No profile",
+  description: "Create a profile to start mapping keys.",
+  icon: DEFAULT_PROFILE_ICON,
+  mappings: [],
+};
+
+function cloneProfile(p: Profile): Profile {
+  return { ...p, mappings: p.mappings.map((m): Mapping => [m[0], m[1]]) };
+}
+
+function cloneProfiles(src: ProfilesMap): ProfilesMap {
+  const out: ProfilesMap = {};
+  for (const [id, p] of Object.entries(src)) out[id] = cloneProfile(p);
+  return out;
+}
+
+/** Migra un mapa ya validado y añade builtins que falten (una vez). */
+function sanitizeProfiles(input: ProfilesMap): ProfilesMap {
+  for (const p of Object.values(input)) {
+    p.icon = migrateLegacyIcon(p.icon);
+    p.disabled = pruneDisabledSources(p.mappings, p.disabled);
+  }
+  let stamped: string | null = null;
+  try {
+    stamped = localStorage.getItem("lefty_builtins_v");
+  } catch {
+    stamped = BUILTIN_VERSION;
+  }
+  if (stamped !== BUILTIN_VERSION) {
+    for (const [id, bp] of Object.entries(BUILTIN)) {
+      if (!input[id]) input[id] = cloneProfile(bp);
+    }
+    for (const [id, legacy] of Object.entries(LEGACY_FACTORY)) {
+      const cur = input[id];
+      if (cur && JSON.stringify(cur.mappings) === JSON.stringify(legacy) && BUILTIN[id]) {
+        input[id] = cloneProfile(BUILTIN[id]);
+      }
+    }
+    try {
+      localStorage.setItem("lefty_builtins_v", BUILTIN_VERSION);
+    } catch {
+      /* sin storage: la migración se repite en memoria */
+    }
+  }
+  return input;
+}
+
+/** Carga perfiles de localStorage con validación; nunca lanza. */
+function loadProfiles(): ProfilesMap {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem("lefty_profiles");
+  } catch {
+    return cloneProfiles(BUILTIN);
+  }
+  if (!raw) return cloneProfiles(BUILTIN);
+  try {
+    const parsed = JSON.parse(raw);
+    const { profiles } = validateProfilesMap(parsed);
+    return sanitizeProfiles(profiles);
+  } catch {
+    // Conserva el JSON roto para poder recuperarlo a mano; la UI arranca
+    // con la fábrica en vez de quedarse en blanco.
+    try {
+      localStorage.setItem("lefty_profiles_corrupt", raw);
+    } catch {
+      /* sin storage */
+    }
+    return cloneProfiles(BUILTIN);
+  }
+}
+
+function loadActiveId(): string {
+  try {
+    const saved = localStorage.getItem("lefty_active");
+    if (saved) return saved;
+  } catch {
+    /* sin storage */
+  }
+  return "zurdo_ijkl";
 }
 
 /** ¿El exe/título en foco corresponde a las autoApps del perfil? */
@@ -135,20 +259,25 @@ function profileMatchesApps(p: Profile | undefined, exe: string, title: string):
 }
 
 export default function App() {
-  const [active, setActive] = useState("zurdo_ijkl");
-  const [profiles, setProfiles] = useState<ProfilesMap>(BUILTIN);
+  const [active, setActive] = useState<string>(() => loadActiveId());
+  const [profiles, setProfiles] = useState<ProfilesMap>(() => loadProfiles());
   const [enabled, setEnabled] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [adminDismissed, setAdminDismissed] = useState(false);
   const [invertMouse, setInvertMouse] = useState(false);
+  const invertMouseRef = useRef(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCapri, setShowCapri] = useState(false);
+  const capriLogoRef = useRef<HTMLButtonElement | null>(null);
   const [closingAdd, setClosingAdd] = useState(false);
   const [closingSettings, setClosingSettings] = useState(false);
+  const [closingCapri, setClosingCapri] = useState(false);
   const [closingDelete, setClosingDelete] = useState(false);
-  const [srcKey, setSrcKey] = useState("W");
-  const [dstKey, setDstKey] = useState("I");
+  // Add vacío = el remap más común: I (mano derecha) → W (lo que espera el juego).
+  const [srcKey, setSrcKey] = useState("I");
+  const [dstKey, setDstKey] = useState("W");
   const [capturing, setCapturing] = useState<null | "src" | "dst">(null);
   const [allKeys, setAllKeys] = useState<string[]>(FALLBACK_ALL_KEYS);
   // Probador en vivo del modal Add: última tecla física capturada.
@@ -174,11 +303,19 @@ export default function App() {
 
   // Reset total: borra todo `lefty_*` y recarga de fábrica (doble clic).
   const [resetArmed, setResetArmed] = useState(false);
-  const resetAllData = () => {
+  const resetAllData = async () => {
     if (!resetArmed) {
       setResetArmed(true);
       window.setTimeout(() => setResetArmed(false), 5000);
       return;
+    }
+    try {
+      // Backend: para engine, restaura mouse/accesibilidad, quita autostart y
+      // borra los archivos de %APPDATA%\Lefty. Sin esto el "reset" solo
+      // limpiaba localStorage y quedaban hotkey, autostart y clicks invertidos.
+      await invoke("reset_app_state");
+    } catch {
+      /* sin backend: al menos limpiar storage */
     }
     try {
       const doomed: string[] = [];
@@ -244,14 +381,6 @@ export default function App() {
       return false;
     }
   });
-  useEffect(() => {
-    if (firstEnabledSync.current) {
-      firstEnabledSync.current = false;
-      return;
-    }
-    playToggleSound(enabled);
-  }, [enabled]);
-
   // Foco gamer en CADA transición (botón, F6 o arranque): F6 conmuta en el
   // engine sin pasar por set_engine_enabled, así que va por efecto y no por comando.
   useEffect(() => {
@@ -294,13 +423,23 @@ export default function App() {
   // El tour abre el editor en los pasos del Add y lo cierra al salir o retroceder.
   const handleTourStep = useCallback((s: number) => {
     if (s >= 3 && s <= 6) {
-      setClosingAdd(false);
-      setShowAdd(true);
+      openAdd();
     } else {
+      invoke("cancel_capture").catch(() => {});
+      setCapturing(null);
+      setTesting(false);
+      setTestKey(null);
+      setTestOpen(false);
       setShowAdd(false);
     }
   }, []);
   const finishTour = () => {
+    invoke("cancel_capture").catch(() => {});
+    setCapturing(null);
+    setTesting(false);
+    setTestKey(null);
+    setTestOpen(false);
+    setArmedCapture(false);
     setShowAdd(false);
     finishOnboard();
   };
@@ -430,9 +569,9 @@ export default function App() {
               setAutoHeld(true);
               suppressChimeRef.current = true;
               setEnabled(false);
-              invoke("set_engine_enabled", { enabled: false })
-                .then(() => invoke("stop_engine").catch(() => {}))
-                .catch(() => {});
+              // No parar el engine: sigue escuchando el hotkey y las teclas
+              // físicas para liberar las inyectadas (apply_enabled lo hace).
+              invoke("set_engine_enabled", { enabled: false }).catch(() => {});
             }, PAUSE_SETTLE_MS);
           };
           if (autoPause && !skipFirst && cur) {
@@ -454,7 +593,22 @@ export default function App() {
     return () => { stop = true; if (timer) clearTimeout(timer); if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = undefined; } if (pauseTimer.current) { clearTimeout(pauseTimer.current); pauseTimer.current = undefined; } };
   }, [profiles, active, enabled, autoPause]);
 
+  const openAdd = () => {
+    invoke("cancel_capture").catch(() => {});
+    setCapturing(null);
+    setTesting(false);
+    setTestKey(null);
+    setTestOpen(false);
+    setArmedCapture(false);
+    setSrcKey("I");
+    setDstKey("W");
+    setDstMods([]);
+    setClosingAdd(false);
+    setShowAdd(true);
+  };
+
   const closeAdd = () => {
+    invoke("cancel_capture").catch(() => {});
     setTesting(false);
     setTestKey(null);
     setTestOpen(false);
@@ -471,23 +625,35 @@ export default function App() {
     setClosingDelete(true);
     setTimeout(() => { setConfirmDelete(null); setClosingDelete(false); }, 320);
   };
+  const closeCapri = () => {
+    setClosingCapri(true);
+    setTimeout(() => {
+      setShowCapri(false);
+      setClosingCapri(false);
+      window.setTimeout(() => capriLogoRef.current?.focus(), 0);
+    }, 260);
+  };
 
-  // Esc cierra de arriba hacia abajo (tour, browser, deletes, add, edit, settings).
-  // Sin deps: se re-suscribe cada render para leer estado fresco.
+  // Esc cierra de arriba hacia abajo (Capri, tour, browser, deletes, add, edit, settings).
+  // Listener estable + ref: el handler siempre ve el estado del render actual,
+  // pero el add/removeEventListener no se repite en cada render.
+  const escHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  escHandlerRef.current = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    if (showCapri) { closeCapri(); return; }
+    if (showOnboard) { finishTour(); return; }
+    if (confirmDelete) { closeDelete(); return; }
+    if (confirmProfile) { closeProfileModal(); return; }
+    if (showBrowser) { setShowBrowser(false); return; }
+    if (showAdd) { closeAdd(); return; }
+    if (creatingProfile || editProfileId) { closeEditProfile(); return; }
+    if (showSettings) { closeSettings(); return; }
+  };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (showOnboard) { finishTour(); return; }
-      if (confirmDelete) { closeDelete(); return; }
-      if (confirmProfile) { closeProfileModal(); return; }
-      if (showBrowser) { setShowBrowser(false); return; }
-      if (showAdd) { closeAdd(); return; }
-      if (creatingProfile || editProfileId) { closeEditProfile(); return; }
-      if (showSettings) { closeSettings(); return; }
-    };
+    const onKey = (e: KeyboardEvent) => escHandlerRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   useEffect(() => {
     invoke<boolean>("is_admin")
@@ -495,10 +661,10 @@ export default function App() {
       .catch(() => setAdminChecked(true));
     invoke<[number, string][]>("get_key_name_list").then(list => {
       if (Array.isArray(list) && list.length > 10) {
-        let names = list.map(([, name]) => name).filter(n => n && n !== "Undefined");
+        let names = list.map(([, name]) => name).filter(n => n && n !== "Undefined" && !n.startsWith("VK "));
         // Filtrar teclas raras que no existen en teclados normales (F13-F24, Execute, etc.)
-        const hide = new Set(["F13","F14","F15","F16","F17","F18","F19","F20","F21","F22","F23","F24","Execute","Help","Select","Print","Apps","Sleep","Separator","Clear","CrSel","ExSel","Ereof","Play","Zoom","Noname","Pa1","OemClear","Attn","NoName","Hangeul","Hanja","Junja","Final","Hanja","Convert","NonConvert","Accept","ModeChange"]);
-        names = names.filter(n => !hide.has(n));
+        const hide = new Set(["F13","F14","F15","F16","F17","F18","F19","F20","F21","F22","F23","F24","Execute","Help","Select","Print","Apps","Sleep","Separator","Clear","CrSel","ExSel","Ereof","Play","Zoom","Noname","Pa1","OemClear","Attn","NoName","Hangeul","Hanja","Junja","Final","Hanja","Convert","NonConvert","Accept","ModeChange"].map((n) => n.toLowerCase()));
+        names = names.filter(n => !hide.has(n.toLowerCase()));
         if (!names.includes("Ñ") && FALLBACK_ALL_KEYS.includes("Ñ")) names.push("Ñ");
         if (!names.includes("MOUSE_X1")) names.push("MOUSE_X1");
         if (!names.includes("MOUSE_X2")) names.push("MOUSE_X2");
@@ -506,11 +672,11 @@ export default function App() {
         if (!names.includes("´") && FALLBACK_ALL_KEYS.includes("´")) names.push("´");
         if (!names.includes("`") && FALLBACK_ALL_KEYS.includes("`")) names.push("`");
         // Ordenar según FALLBACK_ALL_KEYS (1→0, F1→F12, A-Z...) para que el dropdown salga bien ordenado
-        const orderMap = new Map<string, number>(FALLBACK_ALL_KEYS.map((k, i) => [k, i]));
+        const orderMap = new Map<string, number>(FALLBACK_ALL_KEYS.map((k, i) => [k.toLowerCase(), i]));
         names = Array.from(new Set(names)); // dedup
         names.sort((a, b) => {
-          const ai = orderMap.has(a) ? orderMap.get(a)! : 10000 + a.charCodeAt(0);
-          const bi = orderMap.has(b) ? orderMap.get(b)! : 10000 + b.charCodeAt(0);
+          const ai = orderMap.has(a.toLowerCase()) ? orderMap.get(a.toLowerCase())! : 10000 + a.charCodeAt(0);
+          const bi = orderMap.has(b.toLowerCase()) ? orderMap.get(b.toLowerCase())! : 10000 + b.charCodeAt(0);
           if (ai !== bi) return ai - bi;
           return a.localeCompare(b);
         });
@@ -520,67 +686,42 @@ export default function App() {
     invoke<boolean>("get_autostart").then(setAutostart).catch(()=>{});
     invoke<boolean>("get_hide_to_tray").then(setHideToTray).catch(()=>{});
     invoke<boolean>("get_start_minimized").then(setStartMinimized).catch(()=>{});
-    invoke<string>("get_hotkey").then(v=> v && setHotkey(v.toUpperCase())).catch(()=>{});
+    invoke<string>("get_hotkey").then(v => {
+      if (!v) return;
+      // Un hotkey modificador se comería Shift/Ctrl/Alt/Win en todo el sistema.
+      if (isModifierKeyName(v)) {
+        setHotkey("F6");
+        invoke("set_hotkey", { hotkey: "F6" }).catch(()=>{});
+      } else {
+        setHotkey(v);
+      }
+    }).catch(()=>{});
   }, []);
+
+  // El perfil activo guardado puede no existir (perfil borrado, storage
+  // manipulado): cae al primero en vez de dejar `prof` indefinido.
+  useEffect(() => {
+    if (profiles[active]) return;
+    const first = Object.keys(profiles)[0];
+    if (first) setActive(first);
+  }, [profiles, active]);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("lefty_profiles");
-      if (saved) {
-        const parsed = JSON.parse(saved) as ProfilesMap;
-        // Migración única: glifos legacy → iconos Lucide.
-        for (const p of Object.values(parsed)) {
-          if (p && typeof p.icon === "string") p.icon = migrateLegacyIcon(p.icon);
-          // Podado: la lista de pausados solo conserva sources existentes.
-          if (p && p.disabled) p.disabled = pruneDisabledSources(p.mappings ?? [], p.disabled);
-          // Migración pauseApps → playApps (allowlist): misma lista, semántica nueva.
-          const legacy = p as Profile & { pauseApps?: unknown };
-          if (p && !p.playApps && Array.isArray(legacy.pauseApps)) {
-            const apps = legacy.pauseApps
-              .filter((x): x is string => typeof x === "string")
-              .map((a) => a.trim().toLowerCase())
-              .filter((a) => a.length > 0);
-            if (apps.length > 0) p.playApps = [...new Set(apps)];
-          }
-          if (p && "pauseApps" in p) delete (p as Record<string, unknown>).pauseApps;
-        }
-        // Migración de builtins (una vez): añade los nuevos que falten y
-        // actualiza los idénticos a la fábrica vieja (los tocados se respetan).
-        let stamped: string | null = null;
-        try {
-          stamped = localStorage.getItem("lefty_builtins_v");
-        } catch {
-          stamped = BUILTIN_VERSION;
-        }
-        if (stamped !== BUILTIN_VERSION && parsed && typeof parsed === "object") {
-          const cloneProfile = (p: Profile): Profile => ({
-            ...p,
-            mappings: p.mappings.map((m): Mapping => [m[0], m[1]]),
-          });
-          for (const [id, bp] of Object.entries(BUILTIN)) {
-            if (!parsed[id]) parsed[id] = cloneProfile(bp);
-          }
-          for (const [id, legacy] of Object.entries(LEGACY_FACTORY)) {
-            const cur = parsed[id];
-            if (cur && JSON.stringify(cur.mappings) === JSON.stringify(legacy) && BUILTIN[id]) {
-              parsed[id] = cloneProfile(BUILTIN[id]);
-            }
-          }
-          try {
-            localStorage.setItem("lefty_builtins_v", BUILTIN_VERSION);
-          } catch {}
-        }
-        setProfiles(parsed);
-      }
-      const savedActive = localStorage.getItem("lefty_active");
-      if (savedActive) setActive(savedActive);
       const savedInvert = localStorage.getItem("lefty_invert");
       if (savedInvert === "true") {
+        invertMouseRef.current = true;
         setInvertMouse(true);
+        // Rust lo ignora solo si aún no se mostró (autostart oculto). Una vez
+        // mostrada, la inversión sigue activa también con Lefty en la bandeja.
         invoke("set_invert_clicks", {enabled: true}).catch(()=>{});
       }
     } catch {}
   }, []);
+
+  useEffect(() => {
+    invertMouseRef.current = invertMouse;
+  }, [invertMouse]);
 
   useEffect(() => {
     try { localStorage.setItem("lefty_profiles", JSON.stringify(profiles)); } catch {}
@@ -600,25 +741,24 @@ export default function App() {
     let cancelled = false;
     invoke<string>("capture_key").then(key => {
       if (cancelled) return;
-      if (allKeys.includes(key)) {
-        if (capturing === "src") setSrcKey(key);
-        else setDstKey(key);
-      } else if (key.length===1) {
-        const up = key.toUpperCase();
-        if (allKeys.includes(up)) {
-          if (capturing === "src") setSrcKey(up);
-          else setDstKey(up);
-        } else if (key.startsWith("VK_")) {
-          if (capturing === "src") setSrcKey(key);
-          else setDstKey(key);
+      const canon = canonicalKeyName(key, allKeys);
+      if (canon) {
+        const invalid =
+          (capturing === "src" && isDisabledKeyName(canon)) ||
+          (capturing === "dst" && isMouseSourceName(canon));
+        if (!invalid) {
+          if (capturing === "src") setSrcKey(canon);
+          else setDstKey(canon);
         }
-      } else if (key.includes("(") || key.includes("VK")) {
-        if (capturing === "src") setSrcKey(key);
-        else setDstKey(key);
       }
       setCapturing(null);
-    }).catch(()=> setCapturing(null));
-    return () => { cancelled = true; };
+    }).catch(()=> { if (!cancelled) setCapturing(null); });
+    return () => {
+      cancelled = true;
+      // No cancelar aquí: cambiar src→dst inicia otra captura y su nueva
+      // generación ya cancela la vieja. El cancel explícito vive en closeAdd,
+      // openAdd, el tester y el desmontaje (evita pisar la captura nueva).
+    };
   }, [capturing, allKeys]);
 
   // Menú del tray: Show, pause/resume, perfiles (checked el activo), Close.
@@ -659,6 +799,35 @@ export default function App() {
       off2?.();
     };
   }, []);
+
+  // La inversión vive mientras Lefty está ejecutándose, incluida la bandeja.
+  // Solo se restaura al cerrar por completo o al apagar/reiniciar Windows.
+  // Al mostrarla por primera vez se "arma"; el fallback de foco cubre el caso
+  // de que el usuario la muestre antes de registrar el listener.
+  useEffect(() => {
+    let offShown: (() => void) | undefined;
+    let dead = false;
+    (async () => {
+      try {
+        const u1 = await listen("lefty-window-shown", () => {
+          if (invertMouseRef.current) invoke("set_invert_clicks", {enabled: true}).catch(()=>{});
+        });
+        if (dead) u1(); else offShown = u1;
+      } catch {
+        /* sin backend de eventos: el toggle manual sigue funcionando */
+      }
+    })();
+    const onFocus = () => {
+      if (invertMouseRef.current) invoke("set_invert_clicks", {enabled: true}).catch(()=>{});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      dead = true;
+      offShown?.();
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
   useEffect(() => {
     invoke("update_tray_menu", {
       profiles: Object.entries(profiles).map(([id, p]) => ({ id, name: p.display_name })),
@@ -672,17 +841,7 @@ export default function App() {
   useEffect(() => {
     if (!testing) return;
     let cancelled = false;
-    const normalize = (key: string): string | null => {
-      if (allKeys.includes(key)) return key;
-      if (key.length === 1) {
-        const up = key.toUpperCase();
-        if (allKeys.includes(up)) return up;
-        if (key.startsWith("VK_")) return key;
-        return null;
-      }
-      if (key.includes("(") || key.includes("VK")) return key;
-      return null;
-    };
+    const normalize = (key: string): string | null => canonicalKeyName(key, allKeys);
     const loop = async () => {
       while (!cancelled) {
         try {
@@ -698,20 +857,47 @@ export default function App() {
       }
     };
     loop();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      invoke("cancel_capture").catch(() => {});
+    };
   }, [testing, allKeys]);
 
-  const prof = profiles[active];
+  const prof = useMemo(
+    () => profiles[active] ?? Object.values(profiles)[0] ?? EMPTY_PROFILE,
+    [profiles, active]
+  );
+  // Listas filtradas por uso: un source no puede ser Disabled, un target no
+  // puede ser un botón del mouse y el hotkey debe ser pulsable/enviable.
+  // Memorizadas: el render se repite con cada poll/captura y estas listas no
+  // cambian salvo que cambie el layout de teclado.
+  const sourceKeys = useMemo(() => allKeys.filter((k) => !isDisabledKeyName(k)), [allKeys]);
+  const targetKeys = useMemo(() => allKeys.filter((k) => !isMouseSourceName(k)), [allKeys]);
+  const hotkeyKeys = useMemo(
+    () =>
+      allKeys.filter(
+        (k) =>
+          !isDisabledKeyName(k) &&
+          !isMouseSourceName(k) &&
+          !k.includes("(Numpad)") &&
+          !isModifierKeyName(k)
+      ),
+    [allKeys]
+  );
   const [mapFilter, setMapFilter] = useState("");
   const [showFilter, setShowFilter] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const filterQuery = mapFilter.trim().toLowerCase();
-  const visibleMappings = filterQuery
-    ? prof.mappings.filter(
-        ([s, d]) => s.toLowerCase().includes(filterQuery) || d.toLowerCase().includes(filterQuery)
-      )
-    : prof.mappings;
-  const pausedSrcs = disabledSet(prof);
+  const visibleMappings = useMemo(
+    () =>
+      filterQuery
+        ? prof.mappings.filter(
+            ([s, d]) => s.toLowerCase().includes(filterQuery) || d.toLowerCase().includes(filterQuery)
+          )
+        : prof.mappings,
+    [prof.mappings, filterQuery]
+  );
+  const pausedSrcs = useMemo(() => disabledSet(prof), [prof]);
   const pausedCount = pausedSrcs.size;
 
   useEffect(() => {
@@ -742,9 +928,9 @@ export default function App() {
       if (next) {
         await invoke("update_mappings", { mappings: engineMappings(prof) });
         await invoke("start_engine", { profile: active });
-      } else {
-        await invoke("stop_engine");
       }
+      // Pausar NO para el engine: el hook debe seguir vivo para que el hotkey
+      // global (F6) pueda reanudar y para no perder el estado de teclas.
     } catch {
       /* el poll de 100ms resincroniza desde f6_toggle.txt */
     }
@@ -767,7 +953,7 @@ export default function App() {
         <Power size={compact ? 13 : 15} /> Paused
       </span>
       <span className={`relative z-10 flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors duration-300 ${compact ? "h-7 w-[86px] text-[12px]" : "h-9 w-[120px] text-[13px]"} ${enabled ? "text-on-primary" : "text-on-surface-variant"}`}>
-        <span className={`rounded-full ${compact ? "w-1.5 h-1.5" : "w-2.5 h-2.5"} ${enabled ? "bg-on-primary animate-pulse" : "bg-current opacity-60"}`} />
+        <span className={`rounded-full ${compact ? "w-1.5 h-1.5" : "w-2.5 h-2.5"} ${enabled ? "bg-on-primary" : "bg-current opacity-60"}`} />
         Active
       </span>
     </div>
@@ -785,9 +971,10 @@ export default function App() {
   // Acento por perfil: si el activo trae uno válido, manda; si no, el global.
   // El pintado se centraliza aquí (el provider solo persiste el global).
   // applyAccent respeta el modo alto contraste; highContrast en deps repinta al conmutar.
-  const { accent, accentHex, highContrast } = useAccent();
+  const { accent, accentHex, highContrast, theme } = useAccent();
   useEffect(() => {
-    syncProfile(profiles[active]);
+    const p = profiles[active];
+    if (p) syncProfile(p);
   }, [active]);
   useEffect(() => {
     const stored = profiles[active]?.accent;
@@ -798,13 +985,42 @@ export default function App() {
       applyAccent(accentHex);
     }
   }, [active, profiles, accentHex, highContrast]);
+  useEffect(() => {
+    // El tema va después del acento: en Cyberpunk sus tokens neón mandan.
+    applyTheme(theme);
+  }, [theme]);
+
+  const openCapri = () => {
+    if (theme !== "cyberpunk") return;
+    setClosingCapri(false);
+    setShowCapri(true);
+  };
+  useEffect(() => {
+    if (theme === "cyberpunk" || !showCapri) return;
+    setShowCapri(false);
+    setClosingCapri(false);
+  }, [theme, showCapri]);
 
   // Auto-start: apply the launch preference, then load profiles and start engine
-  // El poll de 100ms NO sincroniza hasta que el arranque escribe la
-  // preferencia: si no, el f6_toggle.txt rancio de la sesión anterior
-  // voltea la UI dos veces (activo→pausado con doble chime).
+  // El poll NO sincroniza hasta que el arranque escribe la preferencia: si no,
+  // el f6_toggle.txt rancio de la sesión anterior voltea la UI dos veces.
+  // 250 ms basta para F6 y evita 10 IPC/s; oculto/minimizado no se consulta y
+  // al volver a mostrar/foco se resincroniza al instante.
   const engineReadyRef = useRef(false);
   useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (cancelled || !engineReadyRef.current || document.visibilityState === "hidden" || inFlight) return;
+      inFlight = true;
+      try {
+        const state = await invoke<boolean>("get_engine_enabled");
+        if (!cancelled) setEnabled(prev => prev !== state ? state : prev);
+      } catch {
+      } finally {
+        inFlight = false;
+      }
+    };
     const t = setTimeout(() => {
       if (launchedRef.current) return;
       launchedRef.current = true;
@@ -812,39 +1028,31 @@ export default function App() {
       try { startActive = localStorage.getItem("lefty_start_active") === "true"; } catch {}
       setEnabled(startActive);
       const launch = () => {
-        try {
-          const saved = localStorage.getItem("lefty_profiles");
-          const savedActive = localStorage.getItem("lefty_active");
-          let curProfiles = profiles;
-          let curActive = active;
-          if (saved) {
-            try { curProfiles = JSON.parse(saved); } catch {}
-          }
-          if (savedActive) curActive = savedActive;
-          const cp = (curProfiles[curActive] ?? profiles[active]) as Profile | undefined;
-          const m = cp ? engineMappings(cp) : [];
-          invoke("update_mappings", {mappings: m}).then(()=> invoke("start_engine", {profile: curActive}).catch(()=>{})).catch(()=>{});
-        } catch {
-          invoke("update_mappings", {mappings: engineMappings(profiles[active])}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
-        }
+        // Estado ya validado en memoria (loadProfiles): nunca re-leer el JSON
+        // crudo de localStorage, que puede estar corrupto.
+        const cp = profiles[active];
+        const m = cp ? engineMappings(cp) : [];
+        invoke("update_mappings", {mappings: m}).then(()=> invoke("start_engine", {profile: active}).catch(()=>{})).catch(()=>{});
       };
-      const go = () => { engineReadyRef.current = true; launch(); };
+      const go = () => { engineReadyRef.current = true; launch(); void poll(); };
       invoke("set_engine_enabled", { enabled: startActive }).then(go).catch(go);
     }, 400);
-    const id = setInterval(async () => {
-      // Hasta que el arranque escribe la preferencia, el fichero manda
-      // basura de la sesión anterior: no espejarlo.
-      if (!engineReadyRef.current) return;
-      try {
-        const state = await invoke<boolean>("get_engine_enabled");
-        setEnabled(prev => prev !== state ? state : prev);
-      } catch {}
-    }, 100);
-    return () => { clearTimeout(t); clearInterval(id); };
+    const id = setInterval(() => { void poll(); }, 250);
+    const resync = () => { if (!document.hidden) void poll(); };
+    document.addEventListener("visibilitychange", resync);
+    window.addEventListener("focus", resync);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", resync);
+      window.removeEventListener("focus", resync);
+    };
   }, [profiles, active]);
 
   useEffect(() => {
     return () => {
+      invoke("cancel_capture").catch(()=>{});
       invoke("set_invert_clicks", {enabled: false}).catch(()=>{});
       invoke("stop_engine").catch(()=>{});
     };
@@ -852,20 +1060,21 @@ export default function App() {
 
   const addMap = () => {
     // Bloqueado por validación (el botón ya viene disabled)
-    if (!mappingValidation.canSave) return;
+    if (!mappingValidation.canSave || isDisabledKeyName(srcKey)) return;
+    const cur = profiles[active];
+    if (!cur) return;
     const next = { ...profiles };
-    const cur = next[active];
     const newMappings = [...cur.mappings, [srcKey, dstTarget] as Mapping];
-    cur.mappings = newMappings;
-    next[active] = { ...cur };
+    next[active] = { ...cur, mappings: newMappings };
     setProfiles(next);
     syncProfile(next[active]);
     closeAdd();
   };
 
   const swapMap = (s: string, d: string) => {
+    const cur = profiles[active];
+    if (!cur) return;
     const next = { ...profiles };
-    const cur = next[active];
     const wasOff = (cur.disabled ?? []).includes(s);
     const newMappings = cur.mappings.filter(([src]) => src !== s);
     let disabled = (cur.disabled ?? []).filter((x) => x !== s);
@@ -880,8 +1089,9 @@ export default function App() {
   };
 
   const delMap = (src: string) => {
+    const cur = profiles[active];
+    if (!cur) return;
     const next = { ...profiles };
-    const cur = next[active];
     const newMappings = cur.mappings.filter(([s]) => s !== src);
     next[active] = { ...cur, mappings: newMappings, disabled: pruneDisabledSources(newMappings, cur.disabled) };
     setProfiles(next);
@@ -891,6 +1101,7 @@ export default function App() {
   /** Pausa/reanuda un mapeo suelto (reserva su source, no llega al engine). */
   const toggleMapping = (src: string) => {
     const cur = profiles[active];
+    if (!cur) return;
     const off = new Set(cur.disabled ?? []);
     if (off.has(src)) off.delete(src);
     else off.add(src);
@@ -1104,14 +1315,21 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-surface-dim text-on-surface flex flex-col overflow-hidden selection:bg-primary/20 relative font-sans antialiased">
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-tertiary/5 pointer-events-none" />
+    <div className="app-shell h-screen bg-surface-dim text-on-surface flex flex-col overflow-hidden selection:bg-primary/20 relative font-sans antialiased">
+      <div className="app-ambient absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-tertiary/5 pointer-events-none" />
       <header className="px-5 pt-4 sticky top-0 z-10">
         <div className="h-[72px] bg-surface-container border border-outline-variant rounded-[20px] flex items-center justify-between px-5 shadow-m3-1">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-primary-container grid place-items-center shadow-m3-1 overflow-hidden border border-outline-variant">
-            <img src={laskIcon} alt="Lefty" className="w-full h-full object-cover" />
-          </div>
+          <button
+            ref={capriLogoRef}
+            type="button"
+            onClick={openCapri}
+            disabled={theme !== "cyberpunk"}
+            aria-label={theme === "cyberpunk" ? "Open Capri transmission" : "Lefty"}
+            className="capri-logo w-10 h-10 p-0 rounded-xl bg-primary-container grid place-items-center shadow-m3-1 overflow-hidden border border-outline-variant disabled:cursor-default disabled:opacity-100"
+          >
+            <img src={laskIcon} alt="Lefty" draggable={false} className="w-full h-full object-cover" />
+          </button>
           <div className="leading-none">
             <div className="flex items-baseline gap-2">
               <h1 className="text-[18px] font-display font-semibold tracking-tight text-on-surface">Lefty</h1>
@@ -1128,7 +1346,7 @@ export default function App() {
               <Settings size={18} />
             </button>
             {updateInfo && (
-              <span title={`Update available: ${updateInfo.latest}`} className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary border-2 border-surface-container animate-pulse" />
+              <span title={`Update available: ${updateInfo.latest}`} className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-primary border-2 border-surface-container" />
             )}
           </div>
         </div>
@@ -1162,7 +1380,7 @@ export default function App() {
       {updateInfo && !updateDismissed && (
         <div className="px-5 pt-3 max-w-[1440px] w-full mx-auto">
           <div className="rounded-2xl border border-outline-variant bg-primary-container/25 px-4 py-2.5 flex items-center gap-3 shadow-m3-1 animate-m3-fade-in">
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
+            <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
             <p className="flex-1 min-w-0 text-[12px] text-on-surface truncate">
               New version <span className="font-medium">{updateInfo.latest}</span> available
             </p>
@@ -1205,8 +1423,8 @@ export default function App() {
               const customPainted = customHex && highContrast ? adjustForContrast(customHex) : customHex;
               return (
               <div key={key} className="relative">
-                <button onClick={() => { setActive(key); setOpenMenuId(null); }} className={`w-full text-left p-3 rounded-xl border flex items-center gap-3 ${selected ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant hover:bg-surface-container-highest text-on-surface"}`}>
-                  <span className={`relative w-8 h-8 grid place-items-center rounded-lg font-medium flex-shrink-0 ${selected ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}><ProfileGlyph icon={p.icon} size={15} />
+                <button onClick={() => { setActive(key); setOpenMenuId(null); }} className={`profile-card w-full text-left p-3 rounded-xl border flex items-center gap-3 ${selected ? "bg-primary text-on-primary border-primary shadow-m3-1" : "bg-surface-container-high border-outline-variant hover:bg-surface-container-highest text-on-surface"}`}>
+                  <span className={`profile-glyph relative w-8 h-8 grid place-items-center rounded-lg font-medium flex-shrink-0 ${selected ? "bg-on-primary text-primary" : "bg-secondary-container text-on-secondary-container"}`}><ProfileGlyph icon={p.icon} size={15} />
                     {customPainted && <span title="Custom accent" className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface-container" style={{ backgroundColor: customPainted }} />}
                   </span>
                   <div className="flex-1 min-w-0 pr-6">
@@ -1281,10 +1499,10 @@ export default function App() {
           <div className="px-6 py-5 border-b border-outline-variant">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-[17px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={16} className="text-on-surface-variant"/> {prof.display_name}{autoHeld && !enabled && (<span title="Paused automatically — return to your games or resume manually" className="text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">AUTO</span>)}</h2>
+                <h2 className="text-[17px] font-display font-semibold tracking-tight text-on-surface flex items-center gap-2"><Keyboard size={16} className="text-on-surface-variant"/> {prof.display_name}{autoHeld && !enabled && (<span title="Paused automatically — return to your games or resume manually" className="auto-badge text-[10px] font-medium tracking-widest text-on-surface-variant border border-outline-variant px-1.5 py-0.5 rounded-full">AUTO</span>)}</h2>
                 <p className="text-[13px] text-on-surface-variant mt-1.5 leading-relaxed max-w-[560px]">{prof.description}</p>
               </div>
-               <button data-tour="add" onClick={()=>setShowAdd(true)} className="hidden sm:inline-flex h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-all duration-150 m3-pressable active:scale-[0.96] hover:scale-[1.02]"><Plus size={15}/> Add</button>
+               <button data-tour="add" onClick={openAdd} className="hidden sm:inline-flex h-9 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-all duration-150 m3-pressable active:scale-[0.96] hover:scale-[1.02]"><Plus size={15}/> Add</button>
             </div>
           </div>
           <div className="px-6 py-3 flex items-center justify-between gap-2 text-[11px] font-medium tracking-widest text-on-surface-variant border-b border-outline-variant bg-surface-container-high">
@@ -1323,7 +1541,7 @@ export default function App() {
                 <div className="w-12 h-12 mx-auto rounded-2xl bg-surface-container-high border border-outline-variant grid place-items-center text-outline"><Keyboard size={22}/></div>
                 <p className="text-[15px] font-medium text-on-surface mt-4">No mappings</p>
                 <p className="text-[13px] text-on-surface-variant mt-1">Add your first remap to start</p>
-                <button onClick={()=>setShowAdd(true)} className="mt-5 h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium m3-pressable active:scale-[0.96] transition-transform duration-150">Add mapping</button>
+                <button onClick={openAdd} className="mt-5 h-10 px-5 rounded-full bg-primary text-on-primary text-[13px] font-medium m3-pressable active:scale-[0.96] transition-transform duration-150">Add mapping</button>
               </div>
             ) : visibleMappings.length === 0 ? (
               <div className="py-12 text-center">
@@ -1333,27 +1551,27 @@ export default function App() {
             ) : visibleMappings.map(([s, d]) => {
               const paused = pausedSrcs.has(s);
               return (
-              <div key={s} className={`h-[58px] bg-surface-container-high border border-outline-variant rounded-2xl flex items-center px-4 gap-3 ${paused ? "opacity-60" : ""}`}>
-                <span className="px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[76px] text-center text-on-surface">{s}</span>
-                <span className={`w-8 h-8 rounded-full grid place-items-center text-[14px] font-medium ${paused ? "bg-surface-container-highest border border-outline-variant text-on-surface-variant" : "bg-primary text-on-primary shadow-m3-1"}`}>→</span>
-                <span className="px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[76px] text-center border border-outline-variant">{d}</span>
+              <div key={s} className={`mapping-row h-[58px] bg-surface-container-high border border-outline-variant rounded-2xl flex items-center px-4 gap-3 ${paused ? "opacity-60" : ""}`}>
+                <span className="mapping-source px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[76px] text-center text-on-surface">{s}</span>
+                <span className={`mapping-arrow w-8 h-8 rounded-full grid place-items-center text-[14px] font-medium ${paused ? "bg-surface-container-highest border border-outline-variant text-on-surface-variant" : "bg-primary text-on-primary shadow-m3-1"}`}>→</span>
+                <span className="mapping-target px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[76px] text-center border border-outline-variant">{d}</span>
                 <span className="hidden sm:block text-[12px] text-on-surface-variant ml-1">{paused ? "paused" : "remap"}</span>
                 <div className="ml-auto flex items-center gap-1.5">
                   <button onClick={()=>toggleMapping(s)} title={paused ? "Resume this mapping" : "Pause this mapping"} aria-label={paused ? `Resume ${s}` : `Pause ${s}`} aria-pressed={!paused} className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container">{paused ? <Play size={14}/> : <Pause size={14}/>}</button>
                   <button onClick={()=>swapMap(s,d)} title={isComboTarget(d) ? "Swap needs a single-key target" : s.startsWith("MOUSE_") ? "Swap needs a keyboard source" : "Swap"} disabled={isComboTarget(d) || s.startsWith("MOUSE_")} className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-secondary-container hover:text-on-secondary-container disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-container-highest disabled:hover:text-on-surface-variant"><ArrowLeftRight size={14}/></button>
-                  <button onClick={()=> setConfirmDelete(s)} title="Delete" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-primary hover:text-on-primary hover:border-primary transition-colors"><Trash2 size={14}/></button>
+                  <button onClick={()=> setConfirmDelete(s)} title="Delete" className="mapping-delete w-9 h-9 grid place-items-center rounded-full bg-surface-container-highest border border-outline-variant text-on-surface-variant hover:bg-primary hover:text-on-primary hover:border-primary transition-colors"><Trash2 size={14}/></button>
                 </div>
               </div>
               );
             })}
           </div>
           <div className="p-3 bg-surface-container-high border-t border-outline-variant flex items-center justify-end sm:hidden">
-            <button data-tour="add" onClick={()=>setShowAdd(true)} className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5"><Plus size={14}/>Add</button>
+            <button data-tour="add" onClick={openAdd} className="h-8 px-4 rounded-full bg-primary text-on-primary text-[12px] font-medium flex items-center gap-1.5"><Plus size={14}/>Add</button>
           </div>
         </main>
       </div>
       {(showAdd || closingAdd) && (
-        <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 m3-backdrop ${closingAdd ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeAdd}>
+        <div className={`fixed inset-0 bg-scrim/60 grid place-items-center z-50 p-4 m3-backdrop ${closingAdd ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeAdd}>
           <div className={`w-full max-w-[540px] max-h-[calc(90vh-2rem)] overflow-y-auto bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingAdd ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shadow-m3-1 shrink-0"><Plus size={18}/></span>
@@ -1368,7 +1586,8 @@ export default function App() {
                 <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">SOURCE · YOU PRESS</span>
                 <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "src" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${srcKey.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "src" ? "?" : srcKey}</div>
                 <select value={srcKey} onChange={e=>setSrcKey(e.target.value)} aria-label="Source key" aria-invalid={!mappingValidation.canSave} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${!mappingValidation.canSave ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                  {!sourceKeys.includes(srcKey) && srcKey && <option value={srcKey}>{srcKey}</option>}
+                  {sourceKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
                 <button onClick={()=>{ setTesting(false); setCapturing("src"); }} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="src" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
               </div>
@@ -1379,7 +1598,8 @@ export default function App() {
                 <span className="text-[10px] font-medium tracking-widest text-on-surface-variant">TARGET · IT TYPES</span>
                 <div className={`h-16 rounded-xl border grid place-items-center font-mono font-medium px-2 text-center truncate transition-colors ${capturing === "dst" ? "bg-primary-container text-on-primary-container border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface"} ${dstTarget.length > 6 ? "text-[13px]" : "text-[22px]"}`}>{capturing === "dst" ? "?" : dstTarget}</div>
                 <select value={dstKey} onChange={e=>setDstKey(e.target.value)} aria-label="Target key" aria-invalid={mappingValidation.conflict.kind === "self" || mappingValidation.conflict.kind === "combo"} className={`w-full h-10 rounded-xl bg-surface-container-highest border text-[12px] font-mono px-3 text-on-surface focus:outline-none transition-colors duration-200 ${mappingValidation.conflict.kind === "self" || mappingValidation.conflict.kind === "combo" ? "border-error/70 focus:border-error" : "border-outline-variant focus:border-primary"}`}>
-                  {allKeys.map(k=><option key={k} value={k}>{k}</option>)}
+                  {!targetKeys.includes(dstKey) && dstKey && <option value={dstKey}>{dstKey}</option>}
+                  {targetKeys.map(k=><option key={k} value={k}>{k}</option>)}
                 </select>
                 <button onClick={()=>{ setTesting(false); setCapturing("dst"); }} className={`w-full h-10 rounded-xl text-[12px] font-medium border flex items-center justify-center gap-1.5 transition-colors ${capturing==="dst" ? "bg-primary text-on-primary border-primary" : "bg-surface-container-highest border-outline-variant text-on-surface hover:border-primary"}`}><Keyboard size={13}/>Capture</button>
               </div>
@@ -1447,9 +1667,10 @@ export default function App() {
                       <span className="px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant text-[13px] font-mono font-medium min-w-[64px] text-center text-on-surface">{testKey}</span>
                       <span className="w-7 h-7 rounded-full bg-primary text-on-primary grid place-items-center text-[13px] font-medium">→</span>
                       {(() => {
-                        const entry = prof.mappings.find(([s]) => s === testKey);
+                        const keyId = keyIdentity(testKey);
+                        const entry = prof.mappings.find(([s]) => keyIdentity(s) === keyId);
                         if (!entry) return <span className="text-[12px] text-on-surface-variant">passes through unchanged</span>;
-                        if (pausedSrcs.has(testKey)) return <span className="text-[12px] text-on-surface-variant">paused in this profile — resume it to use</span>;
+                        if ([...pausedSrcs].some((s) => keyIdentity(s) === keyId)) return <span className="text-[12px] text-on-surface-variant">paused in this profile — resume it to use</span>;
                         return <span className="px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-[13px] font-mono font-medium min-w-[64px] text-center border border-outline-variant">{entry[1]}</span>;
                       })()}
                     </div>
@@ -1465,13 +1686,13 @@ export default function App() {
         </div>
       )}
       {(confirmDelete || closingDelete) && (
-        <div className={`fixed inset-0 bg-scrim/70 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingDelete ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeDelete}>
+        <div className={`fixed inset-0 bg-scrim/70 grid place-items-center z-[60] p-4 m3-backdrop ${closingDelete ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeDelete}>
           <div className={`w-full max-w-[460px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 p-7 m3-modal ${closingDelete ? "animate-m3-scale-out" : "animate-m3-scale-in"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-start gap-4">
               <span className="w-12 h-12 rounded-2xl bg-primary text-on-primary grid place-items-center flex-shrink-0 shadow-m3-1 animate-m3-shake"><Trash2 size={22}/></span>
               <div className="flex-1">
                 <h3 className="text-[17px] font-display font-medium text-on-surface leading-snug">Are you sure to delete this keymap?</h3>
-                <p className="text-[13px] leading-relaxed text-on-surface-variant mt-2">This will permanently delete <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full text-on-surface">{confirmDelete} → {profiles[active].mappings.find(([s])=> s===confirmDelete)?.[1] || ""}</span> from <span className="font-medium text-on-surface">{prof.display_name}</span>. This action cannot be undone.</p>
+                <p className="text-[13px] leading-relaxed text-on-surface-variant mt-2">This will permanently delete <span className="font-mono bg-surface-container-highest border border-outline-variant px-1.5 py-0.5 rounded-full text-on-surface">{confirmDelete} → {prof.mappings.find(([s])=> s===confirmDelete)?.[1] || ""}</span> from <span className="font-medium text-on-surface">{prof.display_name}</span>. This action cannot be undone.</p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -1482,7 +1703,7 @@ export default function App() {
         </div>
       )}
       {(confirmProfile || closingProfile) && profiles[confirmProfile ?? ""] && (
-        <div className={`fixed inset-0 bg-scrim/70 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingProfile ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeProfileModal}>
+        <div className={`fixed inset-0 bg-scrim/70 grid place-items-center z-[60] p-4 m3-backdrop ${closingProfile ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeProfileModal}>
           <div className={`w-full max-w-[440px] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 p-6 m3-modal ${closingProfile ? "animate-m3-scale-out" : "animate-m3-scale-in"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-start gap-4">
               <span className="w-12 h-12 rounded-2xl bg-primary text-on-primary grid place-items-center flex-shrink-0 shadow-m3-1 animate-m3-shake"><Trash2 size={22}/></span>
@@ -1499,7 +1720,7 @@ export default function App() {
         </div>
       )}
       {(creatingProfile || ((editProfileId || closingEdit) && editProfileId && profiles[editProfileId])) && (
-        <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-[60] p-4 m3-backdrop ${closingEdit ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={() => closeEditProfile()}>
+        <div className={`fixed inset-0 bg-scrim/60 grid place-items-center z-[60] p-4 m3-backdrop ${closingEdit ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={() => closeEditProfile()}>
           <div className={`w-full max-w-[480px] h-[min(600px,88vh)] flex flex-col bg-surface-container rounded-[28px] border border-outline-variant p-6 shadow-m3-3 m3-modal ${closingEdit ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
             <div className="flex items-center gap-3 shrink-0">
               <span className="w-10 h-10 rounded-[14px] bg-primary text-on-primary grid place-items-center shadow-m3-1 shrink-0"><Pencil size={17}/></span>
@@ -1692,7 +1913,7 @@ export default function App() {
         />
       )}
       {(showSettings || closingSettings) && (
-        <div className={`fixed inset-0 bg-scrim/60 backdrop-blur-sm grid place-items-center z-50 p-4 m3-backdrop ${closingSettings ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeSettings}>
+        <div className={`fixed inset-0 bg-scrim/60 grid place-items-center z-50 p-4 m3-backdrop ${closingSettings ? "animate-m3-backdrop-out" : "animate-m3-backdrop-in"}`} onClick={closeSettings}>
           <div className={`w-full max-w-[860px] max-h-[90vh] bg-surface-container rounded-[28px] border border-outline-variant shadow-m3-3 flex flex-col overflow-hidden m3-modal ${closingSettings ? "animate-m3-slide-down" : "animate-m3-slide-up"}`} onClick={e=>e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-outline-variant bg-surface-container-high flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1782,8 +2003,22 @@ export default function App() {
                 )}
                 {settingsTab === "appearance" && (
                   <div className="animate-m3-fade-in space-y-3">
-                    <AccentColorSection />
-                    {normalizeProfileAccent(prof.accent) && (
+                    <ThemeSection />
+                    {theme === "default" && <AccentColorSection />}
+                    {theme === "cyberpunk" && (
+                      <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-start gap-3">
+                        <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0">
+                          <Palette size={16} />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-medium text-on-surface">Cyberpunk palette active</div>
+                          <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">
+                            This theme uses its own neon yellow, cyan and magenta palette. Accent color and high-contrast controls are paused while Cyberpunk is selected.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {theme === "default" && normalizeProfileAccent(prof.accent) && (
                       <div className="rounded-xl bg-surface-container-high border border-outline-variant p-4 flex items-center gap-3">
                         <span className="w-3 h-3 rounded-full shrink-0 border border-black/20" style={{ backgroundColor: highContrast ? adjustForContrast(resolveAccent(normalizeProfileAccent(prof.accent)!).hex) : resolveAccent(normalizeProfileAccent(prof.accent)!).hex }} />
                         <p className="flex-1 text-[11px] leading-relaxed text-on-surface-variant">
@@ -1832,10 +2067,10 @@ export default function App() {
                         <span className="w-9 h-9 rounded-[12px] bg-secondary-container text-on-secondary-container grid place-items-center flex-shrink-0"><Mouse size={16}/></span>
                         <div className="flex-1">
                           <div className="text-[13px] font-medium text-on-surface">Left-handed mouse — invert clicks</div>
-                          <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Swap primary/secondary button with <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Restored on exit.</div>
+                          <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Swap primary/secondary button with <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">SwapMouseButton</span> (0ms). Applies while Lefty is running, including the tray; restored when Lefty closes or Windows shuts down.</div>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer ml-2">
-                          <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; setInvertMouse(v); invoke("set_invert_clicks",{enabled:v}).catch(()=>{}); try{localStorage.setItem("lefty_invert",String(v));}catch{}}} className="sr-only peer" />
+                          <input type="checkbox" checked={invertMouse} onChange={e=>{ const v=e.target.checked; invertMouseRef.current=v; setInvertMouse(v); invoke("set_invert_clicks",{enabled:v}).catch(()=>{}); try{localStorage.setItem("lefty_invert",String(v));}catch{}}} className="sr-only peer" />
                           <div className="w-11 h-7 bg-surface-container-highest border-2 border-outline rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all before:content-[''] before:absolute before:top-[3px] before:left-[3px] before:bg-outline before:rounded-full before:h-5 before:w-5 before:transition-all peer-checked:before:translate-x-[18px] peer-checked:before:bg-on-primary"></div>
                         </label>
                       </div>
@@ -1848,7 +2083,8 @@ export default function App() {
                           <div className="text-[11px] leading-relaxed text-on-surface-variant mt-1">Key to pause/resume remaps without closing Lefty. Default <span className="font-mono bg-primary text-on-primary px-1.5 py-0.5 rounded-full">F6</span>.</div>
                           <div className="mt-3 flex items-center gap-2">
                             <select value={hotkey} onChange={e=>{ const v=e.target.value; setHotkey(v); invoke("set_hotkey",{hotkey:v}).catch(()=>{}); }} className="h-10 rounded-xl bg-surface-container-highest border border-outline-variant text-[13px] font-mono px-3 text-on-surface min-w-[110px]">
-                              {allKeys.map(k=> <option key={k} value={k}>{k}</option>)}
+                              {!hotkeyKeys.includes(hotkey) && hotkey && <option value={hotkey}>{hotkey}</option>}
+                              {hotkeyKeys.map(k=> <option key={k} value={k}>{k}</option>)}
                             </select>
                             <span className="text-[11px] text-on-surface-variant">Saved to <span className="font-mono bg-surface-container-highest border px-1.5 py-0.5 rounded-full">%APPDATA%\Lefty\hotkey.txt</span></span>
                           </div>
@@ -2017,6 +2253,57 @@ export default function App() {
             <div className="p-4 border-t border-outline-variant bg-surface-container-high flex gap-3">
               <button onClick={closeSettings} className="flex-1 h-11 rounded-full bg-surface-container-highest border border-outline-variant text-on-surface text-[13px] font-medium m3-pressable active:scale-[0.97]">Close</button>
               <button onClick={closeSettings} className="flex-1 h-11 rounded-full bg-primary text-on-primary text-[13px] font-medium m3-pressable active:scale-[0.97] hover:scale-[1.01]">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {(showCapri || closingCapri) && (
+        <div
+          className={`capri-backdrop fixed inset-0 z-[80] grid place-items-center p-4 ${closingCapri ? "capri-backdrop-out" : "capri-backdrop-in"}`}
+          onClick={closeCapri}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="capri-title"
+            aria-describedby="capri-quote"
+            className={`capri-modal w-full max-w-[660px] max-h-[calc(100vh-2rem)] overflow-y-auto ${closingCapri ? "capri-modal-out" : "capri-modal-in"}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="capri-scanlines" aria-hidden />
+            <div className="relative z-10 p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-3 border-b border-[color:var(--capri-line)] pb-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="capri-signal-dot" aria-hidden />
+                  <span className="capri-kicker truncate">SIGNAL INTERCEPTED // S02</span>
+                </div>
+                <button
+                  autoFocus
+                  onClick={closeCapri}
+                  aria-label="Close Capri transmission"
+                  className="capri-close shrink-0"
+                >
+                  <X size={15} strokeWidth={2.4} />
+                </button>
+              </div>
+              <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] sm:items-center">
+                <div className="capri-portrait">
+                  <img src={capriImage} alt="Capri, temporada 2" draggable={false} />
+                  <span className="capri-portrait-tag">VISUAL // 02</span>
+                  <span className="capri-portrait-live"><span aria-hidden /> LIVE</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="capri-kicker">CAPRI // SEASON 02</p>
+                  <h2 id="capri-title" className="capri-name">CAPRI</h2>
+                  <blockquote id="capri-quote" className="capri-quote">
+                    “The game isn’t broken.<br />It’s in <span>lefty mode</span>.”
+                  </blockquote>
+                  <p className="capri-caption">UNAUTHORIZED TRANSMISSION · CHANNEL 02</p>
+                  <button onClick={closeCapri} className="capri-dismiss">
+                    CLOSE TRANSMISSION <span aria-hidden>↵</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

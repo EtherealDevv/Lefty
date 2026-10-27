@@ -17,13 +17,14 @@
         "resizable": true,
         "decorations": true,
         "maximized": true,
-        "center": true
+        "center": true,
+        "backgroundColor": "#121212"
       }
     ],
     "security": {
       "csp": null
     },
-    "withGlobalTauri": true
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,
@@ -36,5 +37,5 @@
   },
   "identifier": "com.lefty.app",
   "productName": "Lefty",
-  "version": "1.7.1"
+  "version": "1.8.0"
 }

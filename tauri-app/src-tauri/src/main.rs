@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::process::{Child, Command, Stdio};
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -10,7 +11,8 @@ use tauri::{State, Manager};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_ENDSESSION, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
 
 mod keyboard_layout;
 
@@ -33,6 +35,15 @@ fn silent_command(prog: &str) -> std::process::Command {
 #[derive(Clone)]
 struct EngineState(Arc<Mutex<Option<Child>>>);
 static CAPTURE_TX: OnceLock<Mutex<Option<mpsc::Sender<(u32, u32)>>>> = OnceLock::new();
+/// Generación de captura: `cancel_capture` la incrementa y el `capture_key` en
+/// vuelo sale en <=5 ms. Sin esto, cerrar el modal seguía tragando teclas
+/// hasta 10 s (el hook quedaba armado y bloqueaba el teclado).
+static CAPTURE_GEN: AtomicU64 = AtomicU64::new(0);
+/// Generación que puede capturar. 0 = ninguna (el hook deja pasar todo).
+static CAPTURE_ACTIVE: AtomicU64 = AtomicU64::new(0);
+/// Último PID → exe resuelto. El poll de foco (4 Hz) evita abrir el proceso y
+/// consultar la ruta completa cuando el primer plano sigue siendo el mismo.
+static FOREGROUND_CACHE: OnceLock<Mutex<Option<(u32, String)>>> = OnceLock::new();
 
 #[tauri::command]
 fn is_admin() -> bool {
@@ -75,6 +86,10 @@ fn restart_as_admin() -> Result<String, String> {
             let exe_w: Vec<u16> = exe.to_string_lossy().encode_utf16().chain(Some(0)).collect();
             let op: Vec<u16> = "runas\0".encode_utf16().collect();
             ShellExecuteW(HWND(std::ptr::null_mut()), PCWSTR(op.as_ptr()), PCWSTR(exe_w.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_NORMAL);
+            // Este exit no pasa por RunEvent::Exit: no dejar el mouse invertido
+            // mientras la nueva instancia elevada arranca.
+            restore_mouse_baseline();
+            a11y_restore();
             std::process::exit(0);
         }
         Err("No se pudo obtener exe".to_string())
@@ -194,12 +209,17 @@ fn update_mappings(mappings: Vec<(String, String)>) -> Result<String, String> {
     let mut vk_map: HashMap<u32, Vec<u32>> = HashMap::new();
     for (s,d) in mappings {
         let parts = split_combo_target(&d);
+        let combo = parts.len() > 1;
         let mut vks: Vec<u32> = Vec::with_capacity(parts.len());
         let mut ok = true;
         for p in &parts {
             match name_to_vk(p) {
-                Some(v) => vks.push(v),
-                None => { ok = false; break; }
+                // Teclas reales 1..=0xFE; "Disabled" solo vale como destino
+                // único (no dentro de un combo). Mouse/DUMMY como destino no
+                // se pueden inyectar como teclado: antes quedaban pegados.
+                Some(v) if (1..=0xFE).contains(&v) => vks.push(v),
+                Some(0x100) if !combo => vks.push(0x100),
+                _ => { ok = false; break; }
             }
         }
         if !ok || vks.is_empty() {
@@ -247,37 +267,73 @@ enum EngineTargets {
     Many(Vec<u32>),
 }
 
-/// Parte un destino combo (`CTRL+S`) con la misma regla del frontend:
-/// un `""` se pega a la parte anterior (`NUM+` sobrevive intacto).
+/// Parte un destino combo (`CTRL+S`). Solo consume modificadores conocidos
+/// al inicio, así una tecla `+` como main (`CTRL++`) y `NUM+` sobreviven.
 fn split_combo_target(dst: &str) -> Vec<String> {
-    if !dst.contains('+') {
-        return vec![dst.to_string()];
-    }
     let mut out: Vec<String> = Vec::new();
-    for part in dst.split('+') {
-        if part.is_empty() && !out.is_empty() {
-            let last = out.len() - 1;
-            out[last].push('+');
-        } else {
-            out.push(part.to_string());
+    let mut rest = dst;
+    loop {
+        let Some(plus) = rest.find('+') else { break };
+        if plus == 0 {
+            break;
         }
+        let head = &rest[..plus];
+        let is_mod = matches!(
+            head.to_ascii_uppercase().as_str(),
+            "CTRL" | "SHIFT" | "ALT" | "LWIN"
+        );
+        if !is_mod {
+            break;
+        }
+        out.push(head.to_string());
+        rest = &rest[plus + 1..];
     }
-    let clean: Vec<String> = out.into_iter().filter(|p| !p.is_empty()).collect();
-    if clean.is_empty() {
+    if out.is_empty() {
         vec![dst.to_string()]
     } else {
-        clean
+        out.push(rest.to_string());
+        out
     }
+}
+
+/// Devuelve el estado en vivo al baseline real del registro. Si el usuario ya
+/// usa Windows en modo zurdo (baseline true), no lo pisamos.
+fn restore_mouse_baseline() {
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton(mouse_baseline_swapped());
+    }
+}
+
+/// Windows termina los procesos con WM_ENDSESSION y tao llama process::exit
+/// directamente, así que RunEvent::Exit no alcanza a restaurar. Esta subclase
+/// corre antes que tao y devuelve el mouse al baseline en apagado/logoff.
+unsafe extern "system" fn shutdown_mouse_subclass(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _uidsubclass: usize,
+    _dwrefdata: usize,
+) -> LRESULT {
+    if msg == WM_ENDSESSION && wparam.0 != 0 {
+        restore_mouse_baseline();
+        a11y_restore();
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
 #[tauri::command]
 fn set_invert_clicks(enabled: bool) -> Result<String, String> {
+    // La inversión vive mientras Lefty se está ejecutando, incluso si la ventana
+    // está en la bandeja o minimizada. Solo se restaura al cerrar por completo
+    // (RunEvent::Exit), al apagar/reiniciar Windows (WM_ENDSESSION) o al
+    // reiniciar como administrador.
     // Restaurar SIEMPRE al baseline real (un OFF anterior con Swap(false) a pelo
     // rompía a quien ya usa Windows en modo zurdo).
     let base = mouse_baseline_swapped();
     unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton;
-        SwapMouseButton(if enabled { true } else { base });
+        let _ = SwapMouseButton(if enabled { true } else { base });
         Ok(format!("SwapMouseButton {}", enabled))
     }
 }
@@ -297,7 +353,7 @@ fn mouse_baseline_swapped() -> bool {
 }
 
 #[tauri::command]
-fn get_engine_enabled() -> Result<bool, String> {
+async fn get_engine_enabled() -> Result<bool, String> {
     let path = if let Ok(appdata) = std::env::var("APPDATA") {
         PathBuf::from(appdata).join("Lefty").join("f6_toggle.txt")
     } else {
@@ -434,12 +490,18 @@ fn set_hotkey(hotkey: String) -> Result<String, String> {
     } else {
         PathBuf::from("hotkey.txt")
     };
-    // Validar que sea una tecla conocida
-    if name_to_vk(&hotkey).is_none() {
-        return Err(format!("Hotkey '{}' is not a valid key", hotkey));
+    // Validar que sea una tecla real. El engine compara contra kb.vkCode y solo
+    // entiende VK_XX o su lista corta de nombres; guardar SIEMPRE VK_XX hace que
+    // cualquier tecla del selector funcione (antes "Volume Up", "Sleep", etc. se
+    // escribían con un nombre que el engine no sabía leer y el hotkey se ignoraba).
+    let vk = name_to_vk(&hotkey).ok_or_else(|| format!("Hotkey '{}' is not a valid key", hotkey))?;
+    let pseudo = matches!(vk, 0x00 | 0x100 | 0x104 | 0x105 | 0x106 | 0xFF);
+    let numpad_origin = (vk & (1u32 << 31)) != 0;
+    if pseudo || numpad_origin || vk > 0xFE {
+        return Err(format!("Hotkey '{}' is not supported", hotkey));
     }
-    fs::write(&path, hotkey.trim().to_uppercase()).map_err(|e| e.to_string())?;
-    Ok(format!("hotkey set to {}", hotkey))
+    fs::write(&path, format!("VK_{:02X}", vk)).map_err(|e| e.to_string())?;
+    Ok(format!("hotkey set to {}", vk_to_name(vk)))
 }
 
 #[tauri::command]
@@ -449,7 +511,17 @@ fn get_hotkey() -> Result<String, String> {
     } else {
         PathBuf::from("hotkey.txt")
     };
-    Ok(fs::read_to_string(&path).unwrap_or_else(|_| "F6".to_string()).trim().to_uppercase())
+    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "F6".to_string());
+    let name = raw.trim();
+    if name.is_empty() {
+        return Ok("F6".to_string());
+    }
+    // Acepta VK_XX (formato nuevo) y nombres legacy. Devuelve el nombre canónico
+    // de la lista de teclas para que el <select> lo muestre seleccionado.
+    match name_to_vk(name) {
+        Some(vk) => Ok(vk_to_name(vk)),
+        None => Ok("F6".to_string()),
+    }
 }
 
 /// Tarea de autostart PowerToys-style: logon del usuario, token interactivo
@@ -499,8 +571,7 @@ fn get_exe_for_autostart() -> Result<PathBuf, String> {
     Ok(exe)
 }
 
-#[tauri::command]
-fn set_autostart(enabled: bool) -> Result<String, String> {
+fn set_autostart_blocking(enabled: bool) -> Result<String, String> {
     let exe = get_exe_for_autostart()?;
     let exe_str = exe.to_string_lossy().to_string();
     legacy_autostart_cleanup();
@@ -536,8 +607,7 @@ fn set_autostart(enabled: bool) -> Result<String, String> {
     Ok(format!("autostart {}", enabled))
 }
 
-#[tauri::command]
-fn get_autostart() -> Result<bool, String> {
+fn get_autostart_blocking() -> Result<bool, String> {
     let script = format!(
         "$t=Get-ScheduledTask -TaskName \"{}\" -TaskPath \"{}\" -ErrorAction SilentlyContinue;if($t){{$t.State}}else{{'Missing'}}",
         AUTOSTART_TASK_NAME, AUTOSTART_TASK_PATH
@@ -545,6 +615,21 @@ fn get_autostart() -> Result<bool, String> {
     let out = ps_invoke(&script)?;
     let s = String::from_utf8_lossy(&out.stdout);
     Ok(s.contains("Ready") || s.contains("Running"))
+}
+
+#[tauri::command]
+async fn set_autostart(enabled: bool) -> Result<String, String> {
+    // schtasks/PowerShell tarda cientos de ms: fuera del hilo que pinta la UI.
+    tauri::async_runtime::spawn_blocking(move || set_autostart_blocking(enabled))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_autostart() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(get_autostart_blocking)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -599,8 +684,8 @@ fn get_start_minimized() -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn get_f6_state() -> Result<bool, String> {
-    get_engine_enabled()
+async fn get_f6_state() -> Result<bool, String> {
+    get_engine_enabled().await
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -630,7 +715,6 @@ fn update_tray_menu(
     enabled: bool,
 ) -> Result<String, String> {
     use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
-    use tauri::Manager;
     let show = MenuItem::with_id(&app, "show", "Show", true, None::<&str>).map_err(|e| e.to_string())?;
     let toggle = MenuItem::with_id(
         &app,
@@ -695,8 +779,7 @@ fn update_file_in_dir(path: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[tauri::command]
-fn download_update(url: String) -> Result<DownloadedUpdate, String> {
+fn download_update_blocking(url: String) -> Result<DownloadedUpdate, String> {
     const PREFIX: &str = "https://github.com/EtherealDevv/Lefty/releases/download/";
     if !url.starts_with(PREFIX) {
         return Err("refusing foreign URL".into());
@@ -728,6 +811,13 @@ fn download_update(url: String) -> Result<DownloadedUpdate, String> {
         path: dest.to_string_lossy().to_string(),
         bytes,
     })
+}
+
+#[tauri::command]
+async fn download_update(url: String) -> Result<DownloadedUpdate, String> {
+    tauri::async_runtime::spawn_blocking(move || download_update_blocking(url))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Ejecuta un instalador previamente descargado (solo %TEMP%\LeftyUpdate).
@@ -786,8 +876,7 @@ fn vdf_value(text: &str, key: &str) -> Option<String> {
 
 /// Steam: librerías desde libraryfolders.vdf + manifests. Sin deps extras.
 /// El arte sale del CDN público por appid (sin API key).
-#[tauri::command]
-fn scan_steam_games() -> Vec<FoundGame> {
+fn scan_steam_games_blocking() -> Vec<FoundGame> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
         roots.push(PathBuf::from(pf86).join("Steam"));
@@ -860,9 +949,15 @@ fn scan_steam_games() -> Vec<FoundGame> {
     out
 }
 
-/// Epic: manifiestos JSON con DisplayName + LaunchExecutable. Sin deps extras.
 #[tauri::command]
-fn scan_epic_games() -> Vec<FoundGame> {
+async fn scan_steam_games() -> Vec<FoundGame> {
+    tauri::async_runtime::spawn_blocking(scan_steam_games_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+/// Epic: manifiestos JSON con DisplayName + LaunchExecutable. Sin deps extras.
+fn scan_epic_games_blocking() -> Vec<FoundGame> {
     let base = match std::env::var("ProgramData") {
         Ok(pd) => PathBuf::from(pd).join("Epic").join("EpicGamesLauncher").join("Data").join("Manifests"),
         Err(_) => return Vec::new(),
@@ -908,12 +1003,52 @@ fn scan_epic_games() -> Vec<FoundGame> {
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     out
 }
+
 #[tauri::command]
-fn get_foreground_app() -> Result<ForegroundApp, String> {
+async fn scan_epic_games() -> Vec<FoundGame> {
+    tauri::async_runtime::spawn_blocking(scan_epic_games_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn foreground_exe(pid: u32) -> String {
     unsafe {
         use windows::Win32::Foundation::{CloseHandle, HMODULE};
         use windows::Win32::System::ProcessStatus::K32GetModuleFileNameExW;
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        use windows::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+            PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+        };
+        use windows::core::PWSTR;
+        let mut full = String::new();
+        // QueryFullProcessImageNameW + LIMITED es lo único que funciona con
+        // juegos protegidos (anticheat) sin pedir VM_READ. K32GetModuleFileNameExW
+        // fallaba ahí y el auto-switch nunca detectaba el juego.
+        if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok() && len > 0 {
+                full = String::from_utf16_lossy(&buf[..len as usize]);
+            }
+            let _ = CloseHandle(h);
+        }
+        // Fallback para procesos donde el anterior no esté disponible.
+        if full.is_empty() {
+            if let Ok(h) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) {
+                let mut buf = [0u16; 1024];
+                let len = K32GetModuleFileNameExW(h, HMODULE(std::ptr::null_mut()), &mut buf);
+                if len > 0 {
+                    full = String::from_utf16_lossy(&buf[..len as usize]);
+                }
+                let _ = CloseHandle(h);
+            }
+        }
+        full.rsplit(['\\', '/']).next().unwrap_or("").to_string()
+    }
+}
+
+fn get_foreground_app_blocking() -> Result<ForegroundApp, String> {
+    unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
         let hwnd = GetForegroundWindow();
         if hwnd.0.is_null() {
@@ -921,25 +1056,39 @@ fn get_foreground_app() -> Result<ForegroundApp, String> {
         }
         let mut pid: u32 = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32));
-        let mut exe = String::new();
-        if pid != 0 {
-            if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-                let mut buf = [0u16; 260];
-                let len = K32GetModuleFileNameExW(h, HMODULE(std::ptr::null_mut()), &mut buf);
-                if len > 0 {
-                    let full = String::from_utf16_lossy(&buf[..len as usize]);
-                    if let Some(n) = full.rsplit(['\\', '/']).next() {
-                        exe = n.to_string();
+        let exe = if pid != 0 {
+            let cache = FOREGROUND_CACHE.get_or_init(|| Mutex::new(None));
+            let cached = cache
+                .lock()
+                .ok()
+                .and_then(|g| g.as_ref().and_then(|(p, e)| if *p == pid { Some(e.clone()) } else { None }));
+            match cached {
+                Some(exe) => exe,
+                None => {
+                    let exe = foreground_exe(pid);
+                    if let Ok(mut g) = cache.lock() {
+                        *g = Some((pid, exe.clone()));
                     }
+                    exe
                 }
-                let _ = CloseHandle(h);
             }
-        }
+        } else {
+            String::new()
+        };
         let mut tbuf = [0u16; 512];
         let tlen = GetWindowTextW(hwnd, &mut tbuf);
         let title = String::from_utf16_lossy(&tbuf[..tlen as usize]);
         Ok(ForegroundApp { exe, title })
     }
+}
+
+#[tauri::command]
+async fn get_foreground_app() -> Result<ForegroundApp, String> {
+    // El poll de foco corre 4 veces/s: que Win32/OpenProcess no bloquee el hilo
+    // principal de Tauri (el que mueve la ventana y procesa input).
+    tauri::async_runtime::spawn_blocking(get_foreground_app_blocking)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Abre una URL en el navegador por defecto vía explorer.exe (que corre sin
@@ -968,7 +1117,7 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-fn get_latency_stats() -> Result<LatencyStats, String> {
+async fn get_latency_stats() -> Result<LatencyStats, String> {
     let path = if let Ok(appdata) = std::env::var("APPDATA") {
         PathBuf::from(appdata).join("Lefty").join("latency_stats.json")
     } else {
@@ -1039,8 +1188,16 @@ fn get_key_code_list() -> Vec<u32> {
 
 // native low-level capture: ConfigureDetectSingleKeyRemapUI + DetectSingleRemapKeyUIBackend
 // Low-level hook that suppresses while in detect UI (returns 1), encodes numpad origin, no scan priority
+thread_local! {
+    /// Generación de la captura instalada en ESTE hilo (los low-level hooks
+    /// corren en el hilo que los instala). Evita que el hook de una captura
+    /// vieja robe la tecla de una nueva.
+    static CAPTURE_THREAD_GEN: std::cell::Cell<u64> = std::cell::Cell::new(0);
+}
+
 #[tauri::command]
-fn capture_key() -> Result<String, String> {
+async fn capture_key() -> Result<String, String> {
+    let gen = CAPTURE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let (tx, rx) = mpsc::channel();
     {
         let mtx = CAPTURE_TX.get_or_init(|| Mutex::new(None));
@@ -1052,18 +1209,25 @@ fn capture_key() -> Result<String, String> {
         // WM_XBUTTONDOWN/UP sin importar (evita tocar los imports del módulo).
         const XDOWN: u32 = 0x020B;
         const XUP: u32 = 0x020C;
+        const LLKHF_INJECTED: u32 = 0x10;
+        const LLMHF_INJECTED: u32 = 0x01;
         if n == HC_ACTION as i32 {
             let w_u = w.0 as u32;
             let is_key_down = w_u == WM_KEYDOWN || w_u == WM_SYSKEYDOWN;
             let is_key_up = w_u == WM_KEYUP || w_u == WM_SYSKEYUP;
-            // Suppress while in detect window
-            // For Tauri, capturing state is active until first keydown is detected
-            let has_capture = CAPTURE_TX.get().and_then(|m| m.lock().ok()).map(|g| g.is_some()).unwrap_or(false);
+            // Solo captura el hook de la generación activa (y de este hilo).
+            let my_gen = CAPTURE_THREAD_GEN.with(|g| g.get());
+            let has_capture = my_gen != 0 && CAPTURE_ACTIVE.load(Ordering::SeqCst) == my_gen;
             if has_capture {
+                // Ignorar lo que inyecta el propio Lefty (soltar teclas al pausar,
+                // remaps en vuelo…): antes una tecla inyectada podía "capturarse".
                 // Laterales del mouse: DOWN captura MOUSE_X1/X2, UP se traga.
                 if w_u == XDOWN || w_u == XUP {
+                    let ms = &*(l.0 as *const MSLLHOOKSTRUCT);
+                    if (ms.flags & LLMHF_INJECTED) != 0 {
+                        return CallNextHookEx(HHOOK(std::ptr::null_mut()), n, w, l);
+                    }
                     if w_u == XDOWN {
-                        let ms = &*(l.0 as *const MSLLHOOKSTRUCT);
                         let vk = match (ms.mouseData >> 16) & 0xFFFF {
                             0x0001 => 0x105,
                             0x0002 => 0x106,
@@ -1073,6 +1237,9 @@ fn capture_key() -> Result<String, String> {
                             if let Some(mtx) = CAPTURE_TX.get() {
                                 if let Ok(mut guard) = mtx.lock() {
                                     if let Some(tx) = guard.take() {
+                                        // Captura conseguida: soltar el hook ya.
+                                        CAPTURE_ACTIVE.store(0, Ordering::SeqCst);
+                                        CAPTURE_THREAD_GEN.with(|g| g.set(0));
                                         let _ = tx.send((vk, 0));
                                     }
                                 }
@@ -1083,6 +1250,9 @@ fn capture_key() -> Result<String, String> {
                 }
                 if is_key_down {
                     let kb = &*(l.0 as *const KBDLLHOOKSTRUCT);
+                    if (kb.flags.0 & LLKHF_INJECTED) != 0 {
+                        return CallNextHookEx(HHOOK(std::ptr::null_mut()), n, w, l);
+                    }
                     let vk = kb.vkCode;
                     // Encode numpad origin
                     let ext = (kb.flags.0 & 0x01) != 0;
@@ -1097,6 +1267,8 @@ fn capture_key() -> Result<String, String> {
                     if let Some(mtx) = CAPTURE_TX.get() {
                         if let Ok(mut guard) = mtx.lock() {
                             if let Some(tx) = guard.take() {
+                                CAPTURE_ACTIVE.store(0, Ordering::SeqCst);
+                                CAPTURE_THREAD_GEN.with(|g| g.set(0));
                                 let _ = tx.send((vk_enc, sc));
                             }
                         }
@@ -1112,9 +1284,35 @@ fn capture_key() -> Result<String, String> {
         unsafe { CallNextHookEx(HHOOK(std::ptr::null_mut()), n, w, l) }
     }
     let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(cap_hook), HINSTANCE(std::ptr::null_mut()), 0) }.map_err(|e| format!("hook fail {:?}", e))?;
-    let mouse_hook = unsafe { SetWindowsHookExW(windows::Win32::UI::WindowsAndMessaging::WH_MOUSE_LL, Some(cap_hook), HINSTANCE(std::ptr::null_mut()), 0) }.map_err(|e| format!("mouse hook fail {:?}", e))?;
+    let mouse_hook = match unsafe {
+        SetWindowsHookExW(windows::Win32::UI::WindowsAndMessaging::WH_MOUSE_LL, Some(cap_hook), HINSTANCE(std::ptr::null_mut()), 0)
+    } {
+        Ok(h) => h,
+        Err(e) => {
+            unsafe { let _ = UnhookWindowsHookEx(hook); }
+            // No tocar CAPTURE_TX: otra captura pudo escribir su sender.
+            return Err(format!("mouse hook fail {:?}", e));
+        }
+    };
+    CAPTURE_THREAD_GEN.with(|g| g.set(gen));
+    // Activar solo si seguimos siendo la generación vigente y no hay otra
+    // captura activa. Evita que una captura vieja pise a la nueva y la deje
+    // 10 s esperando una tecla que nunca llegará.
+    let activate_deadline = std::time::Instant::now() + Duration::from_millis(100);
+    while CAPTURE_GEN.load(Ordering::SeqCst) == gen {
+        if CAPTURE_ACTIVE.compare_exchange(0, gen, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            break;
+        }
+        if std::time::Instant::now() >= activate_deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let start = std::time::Instant::now();
     let res = loop {
+        if CAPTURE_GEN.load(Ordering::SeqCst) != gen {
+            break Err("cancelled".to_string());
+        }
         if let Ok(v) = rx.try_recv() {
             break Ok(v);
         }
@@ -1126,7 +1324,7 @@ fn capture_key() -> Result<String, String> {
             let mut msg: MSG = std::mem::zeroed();
             let has = PeekMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0, PM_REMOVE);
             if has.as_bool() {
-                TranslateMessage(&msg);
+                let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             } else {
                 std::thread::sleep(Duration::from_millis(5));
@@ -1135,12 +1333,27 @@ fn capture_key() -> Result<String, String> {
     };
     unsafe { let _ = UnhookWindowsHookEx(hook); }
     unsafe { let _ = UnhookWindowsHookEx(mouse_hook); }
-    if let Some(mtx) = CAPTURE_TX.get() {
-        let _ = mtx.lock().map(|mut g| *g = None);
-    }
+    CAPTURE_THREAD_GEN.with(|g| g.set(0));
+    // Solo se desactiva si seguimos siendo la captura activa (otra pudo
+    // empezar). NO se limpia CAPTURE_TX aquí: si otra captura ya escribió su
+    // sender, limpiarlo la dejaría esperando 10 s con el hook armado.
+    let _ = CAPTURE_ACTIVE.compare_exchange(gen, 0, Ordering::SeqCst, Ordering::SeqCst);
     let (vk_enc, _sc) = res?;
     // native low-level: no scan priority improvisation — use VK directly (clear numpad bit for naming via vk_to_name)
     Ok(vk_to_name(vk_enc))
+}
+
+/// Cancela una captura en vuelo (cerrar el modal, parar el tester o desmontar
+/// la app). Deja el teclado libre en <=5 ms en vez de hasta 10 s.
+#[tauri::command]
+fn cancel_capture() -> Result<String, String> {
+    CAPTURE_GEN.fetch_add(1, Ordering::SeqCst);
+    CAPTURE_ACTIVE.store(0, Ordering::SeqCst);
+    // No se limpia CAPTURE_TX: con ACTIVE=0 ningún hook envía, y limpiarlo
+    // podía borrar el sender de una captura que acaba de empezar en paralelo
+    // (esa captura se quedaba 10 s con el teclado secuestrado). El siguiente
+    // capture_key lo reemplaza.
+    Ok("cancelled".into())
 }
 
 /// ¿Hay algún lefty_engine.exe vivo? (para reap con espera, sin sleeps ciegos)
@@ -1153,7 +1366,7 @@ fn engine_process_running() -> bool {
 }
 
 #[tauri::command]
-fn start_engine(profile: String, state: State<EngineState>, app: tauri::AppHandle) -> Result<String, String> {
+async fn start_engine(profile: String, state: State<'_, EngineState>, app: tauri::AppHandle) -> Result<String, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(child) = guard.as_mut() {
         match child.try_wait() {
@@ -1252,7 +1465,7 @@ fn stop_child_graceful(child: &mut std::process::Child) -> bool {
 }
 
 #[tauri::command]
-fn stop_engine(state: State<EngineState>) -> Result<String, String> {
+async fn stop_engine(state: State<'_, EngineState>) -> Result<String, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = guard.take() {
         if stop_child_graceful(&mut child) {
@@ -1265,12 +1478,46 @@ fn stop_engine(state: State<EngineState>) -> Result<String, String> {
     }
 }
 
+/// Borrado total desde "Reset all data": no basta con limpiar localStorage.
+/// Para el engine, restaura mouse/avisos de accesibilidad, quita el autostart
+/// y borra los archivos de %APPDATA%\Lefty (hotkey, mappings, flags…). Antes el
+/// reset dejaba el autostart activo, los clicks invertidos y el hotkey viejo.
+#[tauri::command]
+async fn reset_app_state(state: State<'_, EngineState>) -> Result<String, String> {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(mut child) = guard.take() {
+            stop_child_graceful(&mut child);
+        }
+    }
+    a11y_restore();
+    restore_mouse_baseline();
+    let _ = set_autostart_blocking(false);
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("Lefty");
+        for name in [
+            "hotkey.txt",
+            "hide_tray.txt",
+            "start_minimized.txt",
+            "engine_mappings.json",
+            "engine_stop.txt",
+            "latency_stats.json",
+            "f6_toggle.txt",
+            "a11y_backup.json",
+            "mouse_orig.txt",
+            "mouse_imposed.txt",
+        ] {
+            let _ = fs::remove_file(dir.join(name));
+        }
+    }
+    Ok("reset".into())
+}
+
 fn kill_existing_instances() {
     // Mata solo instancias que no son la actual (evita suicidio del segundo Lefty)
     let current_pid = std::process::id();
     unsafe {
         use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
-        use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
+        use windows::Win32::Foundation::CloseHandle;
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if let Ok(h) = snapshot {
             let mut entry = PROCESSENTRY32W::default();
@@ -1338,9 +1585,10 @@ fn check_single_instance() -> bool {
                             let _ = CloseHandle(h2);
                         }
                     }
-                    // Reintentar matar si sigue vivo
-                    let _ = silent_command("taskkill").args(["/F", "/IM", "Lefty.exe"]).output();
-                    let _ = silent_command("taskkill").args(["/F", "/IM", "lefty_engine.exe"]).output();
+                    // Reintentar SOLO sobre otras instancias (filtra por PID).
+                    // `taskkill /IM Lefty.exe` mataba también a este proceso
+                    // recién elevado: cero instancias tras aceptar el diálogo.
+                    kill_existing_instances();
                 }
                 // Si no se liberó, intentar igual y continuar
                 let name2: Vec<u16> = "Global\\LeftySingleton\0".encode_utf16().collect();
@@ -1397,7 +1645,21 @@ fn main() {
         .setup(|app| {
             use tauri::tray::{TrayIconBuilder, TrayIconEvent};
             use tauri::menu::{Menu, MenuItem};
-            use tauri::Manager;
+            use tauri::{Emitter, Manager};
+            // Limpiar cualquier inversión en vivo que haya quedado de una sesión
+            // anterior (kill/crash/Fast Startup). Al arrancar minimizado queda
+            // normal hasta que la ventana se muestre una vez; después la
+            // inversión se mantiene también con Lefty en la bandeja.
+            restore_mouse_baseline();
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(hwnd) = window.hwnd() {
+                    // HWND de tauri (windows 0.62) → HWND local (windows 0.58).
+                    let hwnd = HWND(hwnd.0 as _);
+                    unsafe {
+                        let _ = SetWindowSubclass(hwnd, Some(shutdown_mouse_subclass), 0x4C46_5459, 0);
+                    }
+                }
+            }
             let quit = MenuItem::with_id(app, "quit", "Close", true, None::<&str>).unwrap();
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>).unwrap();
             let menu = Menu::with_items(app, &[&show, &quit]).unwrap();
@@ -1414,14 +1676,13 @@ fn main() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                            let _ = app.emit("lefty-window-shown", ());
                         }
                     }
                     "toggle" => {
-                        use tauri::Emitter;
                         let _ = app.emit("tray-toggle", ());
                     }
                     id if id.starts_with("profile:") => {
-                        use tauri::Emitter;
                         let _ = app.emit("tray-switch-profile", &id["profile:".len()..]);
                     }
                     _ => {}
@@ -1431,6 +1692,7 @@ fn main() {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                            let _ = tray.app_handle().emit("lefty-window-shown", ());
                         }
                     }
                 })
@@ -1440,6 +1702,8 @@ fn main() {
             if start_minimized_enabled() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
+                    // Ocultar al arrancar NO deshace la inversión: Lefty sigue
+                    // ejecutándose y la bandeja debe mantenerla.
                 }
             }
             Ok(())
@@ -1452,20 +1716,22 @@ fn main() {
                 ).map(|s| s.trim() != "0").unwrap_or(true);
                 if hide {
                     api.prevent_close();
+                    // Cerrar a la bandeja NO restaura: Lefty sigue ejecutándose
+                    // y la inversión debe seguir activa. El baseline solo vuelve
+                    // al cerrar por completo o al apagar/reiniciar Windows.
                     let _ = window.hide();
                 }
                 // else let close proceed (will trigger RunEvent::Exit cleanup)
             }
         })
-        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, scan_steam_games, scan_epic_games, get_app_version, open_external_url, update_tray_menu, download_update, run_installer])
+        .invoke_handler(tauri::generate_handler![is_admin, restart_as_admin, get_mappings_path, start_engine, stop_engine, update_mappings, capture_key, cancel_capture, reset_app_state, get_key_name_list, get_key_code_list, get_debug_info, get_f6_state, get_engine_enabled, set_engine_enabled, set_invert_clicks, set_hotkey, get_hotkey, set_autostart, get_autostart, set_hide_to_tray, get_hide_to_tray, set_start_minimized, get_start_minimized, get_latency_stats, apply_gamer_focus, get_foreground_app, scan_steam_games, scan_epic_games, get_app_version, open_external_url, update_tray_menu, download_update, run_installer])
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 // Restaurar clicks al baseline real del registro (nunca al estado
                 // en memoria: una 2ª instancia lo habría capturado ya invertido).
-                let base = mouse_baseline_swapped();
-                unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SwapMouseButton(base); }
+                restore_mouse_baseline();
                 // Restaurar avisos de accesibilidad si se suprimieron.
                 a11y_restore();
                 if let Some(state) = app.try_state::<EngineState>() {
@@ -1504,7 +1770,18 @@ fn main() {
 
 #[cfg(test)]
 mod mapping_tests {
-    use super::name_to_vk;
+    use super::{name_to_vk, split_combo_target};
+
+    #[test]
+    fn combo_split_keeps_plus_mains() {
+        assert_eq!(split_combo_target("CTRL+S"), vec!["CTRL", "S"]);
+        assert_eq!(split_combo_target("CTRL+SHIFT+S"), vec!["CTRL", "SHIFT", "S"]);
+        assert_eq!(split_combo_target("CTRL+NUM+"), vec!["CTRL", "NUM+"]);
+        assert_eq!(split_combo_target("CTRL++"), vec!["CTRL", "+"]);
+        assert_eq!(split_combo_target("CTRL++ (Numpad)"), vec!["CTRL", "+ (Numpad)"]);
+        assert_eq!(split_combo_target("+ (Numpad)"), vec!["+ (Numpad)"]);
+        assert_eq!(split_combo_target("NUM+"), vec!["NUM+"]);
+    }
 
     /// Nombres independientes del layout: SIEMPRE deben resolver (letras vía
     /// enum con caps, resto vía alias/overrides). Si falla alguno, perfiles

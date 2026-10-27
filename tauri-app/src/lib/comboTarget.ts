@@ -1,5 +1,4 @@
-/** Destinos combo: `CTRL+S`, `SHIFT+1`… El `+` une partes al guardar.
- *  Las teclas `+` y `NUM+` no pueden ser main de un combo (ambigüedad). */
+/** Destinos combo: `CTRL+S`, `SHIFT+1`… El `+` une partes al guardar. */
 
 export interface ComboMod {
   id: string;
@@ -14,20 +13,23 @@ export const COMBO_MODS: readonly ComboMod[] = [
   { id: "LWIN", label: "Win" },
 ];
 
-/** Mains prohibidos con mods (contienen el separador). */
-export const PLUS_KEYS: readonly string[] = ["+", "NUM+"];
+const COMBO_MOD_IDS = new Set(COMBO_MODS.map((m) => m.id));
 
-/** `"CTRL+S"` → `["CTRL", "S"]`. Regla de pegado: un `""` se suma al
- *  anterior (`"CTRL+NUM+"` → `["CTRL", "NUM+"]`). Sin `+` → single. */
+/** `"CTRL+S"` → `["CTRL", "S"]`; `"CTRL++ (Numpad)"` → `["CTRL", "+ (Numpad)"]`.
+ *  Solo consume modificadores conocidos al inicio, así una tecla `+` (o
+ *  `NUM+`) como destino principal sobrevive intacta. Sin combo → `[dst]`. */
 export function splitComboTarget(dst: string): string[] {
-  if (!dst.includes("+")) return [dst];
   const out: string[] = [];
-  for (const part of dst.split("+")) {
-    if (part === "" && out.length > 0) out[out.length - 1] += "+";
-    else out.push(part);
+  let rest = dst;
+  while (true) {
+    const plus = rest.indexOf("+");
+    if (plus <= 0) break;
+    const head = rest.slice(0, plus);
+    if (!COMBO_MOD_IDS.has(head.toUpperCase())) break;
+    out.push(head);
+    rest = rest.slice(plus + 1);
   }
-  const clean = out.filter((p) => p !== "");
-  return clean.length > 0 ? clean : [dst];
+  return out.length === 0 ? [dst] : [...out, rest];
 }
 
 export function isComboTarget(dst: string): boolean {
